@@ -1,0 +1,40 @@
+import { describe, expect, it } from 'vitest';
+import { applyH, solveHomography } from '../../src/calibration/homography';
+import { findMarkers } from '../../src/calibration/pattern';
+import { gray } from '../helpers';
+import type { Gray, Pt } from '../../src/types';
+
+// Render squares (in "projector" space) through a mild perspective into a 320x240 camera frame.
+function renderLit(centers: Pt[], projToCam: number[]): Gray {
+  const g = gray(320, 240, 25);
+  const camToProj = solveHomography(
+    [0, 1, 2, 3].map((i) => applyH(projToCam, [{ x: 0, y: 0 }, { x: 1000, y: 0 }, { x: 1000, y: 600 }, { x: 0, y: 600 }][i])),
+    [{ x: 0, y: 0 }, { x: 1000, y: 0 }, { x: 1000, y: 600 }, { x: 0, y: 600 }],
+  );
+  for (let y = 0; y < 240; y++) for (let x = 0; x < 320; x++) {
+    const p = applyH(camToProj, { x: x + 0.5, y: y + 0.5 });
+    if (centers.some((c) => Math.abs(p.x - c.x) <= 30 && Math.abs(p.y - c.y) <= 30)) g.data[y * 320 + x] = 230;
+  }
+  return g;
+}
+
+const projToCam = solveHomography(
+  [{ x: 0, y: 0 }, { x: 1000, y: 0 }, { x: 1000, y: 600 }, { x: 0, y: 600 }],
+  [{ x: 20, y: 15 }, { x: 300, y: 25 }, { x: 290, y: 225 }, { x: 30, y: 210 }],
+);
+const centers = [{ x: 120, y: 72 }, { x: 880, y: 72 }, { x: 880, y: 528 }, { x: 120, y: 528 }];
+
+describe('findMarkers', () => {
+  it('finds four squares in order', () => {
+    const got = findMarkers(renderLit(centers, projToCam), gray(320, 240, 25));
+    expect(got).not.toBeNull();
+    got!.forEach((p, i) => {
+      const want = applyH(projToCam, centers[i]);
+      expect(Math.hypot(p.x - want.x, p.y - want.y)).toBeLessThan(1.5);
+    });
+  });
+
+  it('returns null with 3 squares', () => {
+    expect(findMarkers(renderLit(centers.slice(0, 3), projToCam), gray(320, 240, 25))).toBeNull();
+  });
+});

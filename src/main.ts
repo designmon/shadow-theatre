@@ -1,3 +1,4 @@
+import { runCalibration, type Calibration } from './calibration/calibrate';
 import { grabGray, startCamera } from './camera';
 import { drawDebug } from './debug/overlay';
 import { Recorder } from './debug/recorder';
@@ -7,16 +8,34 @@ import { shadowMask } from './vision/shadowMask';
 const stage = createStage();
 const recorder = new Recorder();
 let debug = true;
+let calib: Calibration | null = null;
+let calibrating = false;
+let status = 'not calibrated (press C)';
 
 async function main() {
   const { video, stream } = await startCamera();
+
+  const calibrate = async () => {
+    if (calibrating) return;
+    calibrating = true;
+    try {
+      calib = await runCalibration(stage, video);
+      status = 'calibrated';
+    } catch (err) {
+      status = String((err as Error).message ?? err);
+    } finally {
+      calibrating = false;
+    }
+  };
 
   window.addEventListener('keydown', (e) => {
     const k = e.key.toLowerCase();
     if (k === 'f') document.documentElement.requestFullscreen?.();
     if (k === 'd') debug = !debug;
     if (k === 'r') recorder.toggle(stream);
+    if (k === 'c') calibrate();
   });
+  setTimeout(calibrate, 800);
 
   let last = performance.now();
   let fps = 0;
@@ -24,10 +43,11 @@ async function main() {
     const now = performance.now();
     fps = fps * 0.9 + (1000 / Math.max(1, now - last)) * 0.1;
     last = now;
+    if (calibrating) return requestAnimationFrame(tick);
     const frame = grabGray(video);
     const mask = shadowMask(frame, null);
     clearWhite(stage);
-    if (debug) drawDebug(stage.ctx, { frame, mask, fps, lines: recorder.recording ? ['● REC'] : [] });
+    if (debug) drawDebug(stage.ctx, { frame, mask, fps, lines: [status, ...(recorder.recording ? ['● REC'] : [])] });
     requestAnimationFrame(tick);
   };
   requestAnimationFrame(tick);
