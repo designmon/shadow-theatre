@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Shadow Creatures</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #f4f1ea; overflow: hidden; font-family: system-ui, sans-serif; }
+      canvas { display: block; width: 100vw; height: 100vh; }
+      #labels { position: fixed; inset: 0; pointer-events: none; }
+      #labels div { position: absolute; left: 24px; font-size: 14px; color: #8a8478; letter-spacing: 0.08em; text-transform: uppercase; }
+    </style>
+  </head>
+  <body>
+    <canvas id="c"></canvas>
+    <div id="labels"></div>
+    <script type="module" src="/src/creatures-preview.ts"></script>
+  </body>
+</html>
