@@ -7,6 +7,6 @@ import type { Spawn } from './types';
 
 export const DEFS: Record<CreatureDef['kind'], CreatureDef> = { dog, rabbit, butterfly, swan };
 
-export function createCreature(kind: CreatureDef['kind'], spawn: Spawn): RiggedCreature {
-  return new RiggedCreature(DEFS[kind], spawn);
+export function createCreature(kind: CreatureDef['kind'], spawn: Spawn, seed?: number): RiggedCreature {
+  return new RiggedCreature(DEFS[kind], spawn, seed);
 }

@@ -96,3 +96,15 @@ describe('creature size from the hand', () => {
     expect(Math.max(head.w, head.h)).toBeLessThanOrEqual(100);
   });
 });
+
+describe('butterfly size from the hand', () => {
+  it('a butterfly on a long arm is sized by the hands, not the arm', () => {
+    const box = { x: 300, y: 400, w: 400, h: 120 };
+    const p = new PeelOff({ mask: fillRect(mask(400, 120), 0, 0, 400, 120, 1), box }, { ...spawn, anchorBox: box });
+    run(p, 600);
+    p.resolve({ kind: 'butterfly', confidence: 0.9, facing: 'up', anchor: { x: 0.85, y: 0.5 } });
+    run(p, 50);
+    const head = (p as any).creature.headBoxWorld();
+    expect(Math.max(head.w, head.h)).toBeLessThanOrEqual(130);
+  });
+});

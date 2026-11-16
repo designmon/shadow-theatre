@@ -46,6 +46,11 @@ export class PeelOff implements Creature {
     return this.phase === 'gone' || (this.creature?.done ?? false);
   }
 
+  /** Forward a nearby hand to the creature (once there is one). */
+  avoid(box: Box): void {
+    if (this.phase === 'creature') this.creature?.avoid(box);
+  }
+
   resolve(rec: Recognition): void {
     this.resolution = rec;
   }
@@ -76,10 +81,8 @@ export class PeelOff implements Creature {
     const ax = sb.x + rec.anchor.x * sb.w + this.offset.x, ay = sb.y + rec.anchor.y * sb.h + this.offset.y;
     // head size = the hand's thickness across the reach direction (the arm only adds length)
     const across = this.spawn.openSide === 'left' || this.spawn.openSide === 'right' ? b.h : b.w;
-    const size = kind === 'butterfly' ? Math.max(b.w, b.h) : Math.max(24, Math.min(across, 0.7 * Math.max(b.w, b.h)));
-    const anchorBox = kind === 'butterfly'
-      ? { x: b.x + this.offset.x, y: b.y + this.offset.y, w: b.w, h: b.h }
-      : { x: ax - size / 2, y: ay - size / 2, w: size, h: size };
+    const size = Math.max(24, Math.min(across, 0.7 * Math.max(b.w, b.h)));
+    const anchorBox = { x: ax - size / 2, y: ay - size / 2, w: size, h: size };
     this.creature = createCreature(kind, { ...this.spawn, anchorBox, facing: rec.facing });
     this.creature.alpha = 0;
     this.kind = kind;

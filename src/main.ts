@@ -147,6 +147,10 @@ async function main() {
       mask = shadowMask(frame, null);
     }
 
+    if (scene && calib) {
+      const hand = projectBox(scene.puppetBox, calib.camToProj);
+      for (const c of creatures) if (c instanceof PeelOff) c.avoid(hand);
+    }
     for (const c of creatures) c.update(dt);
     for (let i = creatures.length - 1; i >= 0; i--) if (creatures[i].done) creatures.splice(i, 1);
 

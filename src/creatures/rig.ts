@@ -24,6 +24,8 @@ export type CreatureDef = {
 };
 
 const MIN_SPEED = 0.12; // px per ms
+const FLEE_MS = 800;
+const FLEE_SPEED = 0.35; // px per ms
 
 export class RiggedCreature implements Creature {
   readonly kind: CreatureKind;
@@ -36,11 +38,14 @@ export class RiggedCreature implements Creature {
   private flip = false;
   private speed: number;
 
-  constructor(private def: CreatureDef, spawn: Spawn) {
+  flee: { dir: Pt; until: number } | null = null;
+  private shove: Pt = { x: 0, y: 0 };
+
+  constructor(private def: CreatureDef, spawn: Spawn, seed?: number) {
     this.kind = def.kind;
     const a = spawn.anchorBox;
     this.scale = Math.max(a.w, a.h) / Math.max(def.headBox.w, def.headBox.h);
-    this.path = planPath(spawn);
+    this.path = planPath(spawn, seed);
     this.pathLen = this.path.slice(1).reduce((s, p, i) => s + Math.hypot(p.x - this.path[i].x, p.y - this.path[i].y), 0);
     this.speed = Math.max(MIN_SPEED, (def.speed * Math.max(a.w, a.h)) / 1000);
     const dx = this.path[1].x - this.path[0].x;
@@ -54,13 +59,28 @@ export class RiggedCreature implements Creature {
   update(dtMs: number): void {
     this.t += dtMs;
     if (this.t > this.def.introMs) this.pos = Math.min(this.pathLen, this.pos + dtMs * this.speed);
+    if (this.flee) {
+      this.shove = { x: this.shove.x + this.flee.dir.x * FLEE_SPEED * dtMs, y: this.shove.y + this.flee.dir.y * FLEE_SPEED * dtMs };
+      if (this.t >= this.flee.until) this.flee = null;
+    }
     const dx = pointAlong(this.path, this.pos + 5).x - pointAlong(this.path, this.pos).x;
     if (this.def.flips && Math.abs(dx) > 0.5) this.flip = dx < 0;
   }
 
+  /** A hand shadow came near: dart away from it for a moment (only if within one body-width). */
+  avoid(box: Box): void {
+    const h = this.headBoxWorld();
+    const hc = { x: h.x + h.w / 2, y: h.y + h.h / 2 }, bc = { x: box.x + box.w / 2, y: box.y + box.h / 2 };
+    const reach = Math.max(h.w, h.h) + Math.max(box.w, box.h) / 2;
+    const dx = hc.x - bc.x, dy = hc.y - bc.y, d = Math.hypot(dx, dy);
+    if (d > reach * 1.5 || this.flee) return;
+    this.flee = { dir: d > 0 ? { x: dx / d, y: dy / d } : { x: 0, y: -1 }, until: this.t + FLEE_MS };
+  }
+
   /** Rig-units -> world transform parts: world = at + scale * flip(rig - headCenter + bob). */
   private frame() {
-    const at = pointAlong(this.path, this.pos);
+    const p = pointAlong(this.path, this.pos);
+    const at = { x: p.x + this.shove.x, y: p.y + this.shove.y };
     const hb = this.def.headBox;
     const bob = this.t > 0 && this.def.bob ? this.def.bob(this.t) : { x: 0, y: 0 };
     return { at, s: this.scale, fx: this.flip ? -1 : 1, cx: hb.x + hb.w / 2 - bob.x, cy: hb.y + hb.h / 2 - bob.y };
