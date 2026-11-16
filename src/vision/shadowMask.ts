@@ -51,3 +51,10 @@ export function buildExpected(whiteRef: Gray, projectedDarkCam: Mask): Gray {
   for (let i = 0; i < data.length; i++) if (projectedDarkCam.data[i]) data[i] = 0;
   return { width: whiteRef.width, height: whiteRef.height, data };
 }
+
+/** Where the projector actually lights the wall, in camera space. */
+export function litMask(whiteRef: Gray, min = MIN_LIT): Mask {
+  const data = new Uint8Array(whiteRef.data.length);
+  for (let i = 0; i < data.length; i++) data[i] = whiteRef.data[i] >= min ? 1 : 0;
+  return { width: whiteRef.width, height: whiteRef.height, data };
+}

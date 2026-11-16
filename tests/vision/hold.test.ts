@@ -45,3 +45,23 @@ describe('HoldDetector', () => {
     expect(fired).toEqual([726]);
   });
 });
+
+describe('HoldDetector after a fire', () => {
+  it('does not re-fire for a slightly changed version of the same pose', () => {
+    const d = new HoldDetector({ cooldownMs: 0 });
+    const fired: number[] = [];
+    for (let t = 0; t <= 800; t += 33) if (d.push(sq(100), t)) fired.push(t);
+    // our own creature now covers part of the shadow: the mask shrinks (IoU vs original ~0.6)
+    const partial = fillRect(mask(320, 240), 100, 100, 24, 40, 1);
+    for (let t = 833; t <= 3000; t += 33) if (d.push(partial, t)) fired.push(t);
+    expect(fired).toEqual([726]);
+  });
+
+  it('re-arms once the shape is clearly different', () => {
+    const d = new HoldDetector({ cooldownMs: 0 });
+    const fired: number[] = [];
+    for (let t = 0; t <= 800; t += 33) if (d.push(sq(100), t)) fired.push(t);
+    for (let t = 833; t <= 2000; t += 33) if (d.push(sq(220), t)) fired.push(t);
+    expect(fired.length).toBe(2);
+  });
+});

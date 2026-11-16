@@ -21,7 +21,7 @@ export function drawDebug(
     d[i + 3] = 255;
   }
   tmp!.getContext('2d')!.putImageData(img, 0, 0);
-  const w = ctx.canvas.width * 0.25;
+  const w = ctx.canvas.width * 0.18;
   const h = (w * frame.height) / frame.width;
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);

@@ -44,3 +44,33 @@ describe('analyzeScene', () => {
     expect(s.puppetBox).toEqual({ x: 20, y: 100, w: 60, h: 40 });
   });
 });
+
+describe('analyzeScene with a lit-wall mask', () => {
+  it('entry is measured against the lit wall edge, not the camera frame', () => {
+    const lit = fillRect(mask(W, H), 30, 20, 260, 200, 1); // wall seen inside a dark border
+    const m = mask(W, H);
+    fillRect(m, 30, 60, 40, 160, 1);  // body against the wall's left edge
+    fillRect(m, 70, 110, 120, 12, 1); // arm
+    fillRect(m, 180, 95, 30, 30, 1);  // hand
+    const s = analyzeScene(m, findBlobs(m), lit)!;
+    expect(s.entry).toBe('left');
+    expect(s.openSide).toBe('right');
+    expect(s.puppetBox.x).toBeGreaterThanOrEqual(110);
+    expect(s.bodyBox!.x).toBe(30);
+  });
+});
+
+describe('analyzeScene: body standing on the bottom edge', () => {
+  it('arm reaching right from a body that touches the bottom: open right, puppet is the hand', () => {
+    const lit = fillRect(mask(W, H), 20, 20, 280, 200, 1);
+    const m = mask(W, H);
+    fillRect(m, 40, 90, 50, 130, 1);  // body, touches only the bottom of the lit wall
+    fillRect(m, 90, 110, 120, 12, 1); // arm
+    fillRect(m, 200, 95, 30, 30, 1);  // hand
+    const s = analyzeScene(m, findBlobs(m), lit)!;
+    expect(s.openSide).toBe('right');
+    expect(s.puppetBox.x).toBeGreaterThanOrEqual(120);
+    expect(s.puppetBox.x + s.puppetBox.w).toBe(230);
+    expect(s.puppetBox.y).toBeLessThanOrEqual(95);
+  });
+});

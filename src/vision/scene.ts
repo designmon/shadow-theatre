@@ -18,34 +18,49 @@ function boxOf(indices: Iterable<number>, W: number): Box | null {
  * The performer's shadow: where it enters the frame, the "puppet" (the far
  * tip, where the hands are), and the open side for creatures to move into.
  */
-export function analyzeScene(mask: Mask, blobs: Blob[]): Scene | null {
+export function analyzeScene(mask: Mask, blobs: Blob[], lit?: Mask): Scene | null {
   const blob = blobs[0];
   if (!blob) return null;
   const { width: W, height: H } = mask;
   const sides: Side[] = ['left', 'right', 'up', 'down'];
-  const best = sides.reduce((a, b) => (blob.touches[b] > blob.touches[a] ? b : a));
-  const entry: Side | null = blob.touches[best] > 0 ? best : null;
   const puppet: Mask = { width: W, height: H, data: new Uint8Array(W * H) };
 
-  if (!entry) {
+  // Where the shadow comes in: centroid of its pixels on the wall's edge.
+  const off = (x: number, y: number) => x < 0 || y < 0 || x >= W || y >= H || (lit ? !lit.data[y * W + x] : false);
+  let ax = 0, ay = 0, n = 0;
+  for (const i of blob.pixels) {
+    const x = i % W, y = (i / W) | 0;
+    if (off(x - 1, y) || off(x + 1, y) || off(x, y - 1) || off(x, y + 1)) { ax += x; ay += y; n++; }
+  }
+
+  if (n === 0) {
     for (const i of blob.pixels) puppet.data[i] = 1;
     const b = blob.box;
     const gaps: Record<Side, number> = { left: b.x, right: W - (b.x + b.w), up: b.y, down: H - (b.y + b.h) };
     const openSide = sides.reduce((a, c) => (gaps[c] > gaps[a] ? c : a));
     return { puppet, puppetBox: b, entry: null, openSide, bodyBox: null };
   }
+  ax /= n; ay /= n;
 
-  // Coordinate along the entry axis, measured from the entry edge.
-  const along = (i: number) => {
+  // The puppet is the far end: the pixel farthest from the entry point sets the reach direction.
+  let fx = ax, fy = ay, best = -1;
+  for (const i of blob.pixels) {
     const x = i % W, y = (i / W) | 0;
-    return entry === 'left' ? x : entry === 'right' ? W - 1 - x : entry === 'up' ? y : H - 1 - y;
-  };
-  let far = 0;
-  for (const i of blob.pixels) far = Math.max(far, along(i));
-  const span = (entry === 'left' || entry === 'right' ? W : H) * TIP_FRACTION;
-  const tip: number[] = [], body: number[] = [];
-  for (const i of blob.pixels) (far - along(i) <= span ? tip : body).push(i);
-  for (const i of tip) puppet.data[i] = 1;
+    const d = (x - ax) ** 2 + (y - ay) ** 2;
+    if (d > best) { best = d; fx = x; fy = y; }
+  }
+  const dx = fx - ax, dy = fy - ay;
+  const openSide: Side = Math.abs(dx) >= Math.abs(dy) ? (dx >= 0 ? 'right' : 'left') : dy >= 0 ? 'down' : 'up';
   const opposite: Record<Side, Side> = { left: 'right', right: 'left', up: 'down', down: 'up' };
-  return { puppet, puppetBox: boxOf(tip, W)!, entry, openSide: opposite[entry], bodyBox: boxOf(body, W) };
+
+  // Distance (along the reach axis) back from the farthest point.
+  const back = (i: number) => {
+    const x = i % W, y = (i / W) | 0;
+    return openSide === 'right' ? fx - x : openSide === 'left' ? x - fx : openSide === 'down' ? fy - y : y - fy;
+  };
+  const span = (openSide === 'left' || openSide === 'right' ? W : H) * TIP_FRACTION;
+  const tip: number[] = [], body: number[] = [];
+  for (const i of blob.pixels) (back(i) <= span ? tip : body).push(i);
+  for (const i of tip) puppet.data[i] = 1;
+  return { puppet, puppetBox: boxOf(tip, W)!, entry: opposite[openSide], openSide, bodyBox: boxOf(body, W) };
 }

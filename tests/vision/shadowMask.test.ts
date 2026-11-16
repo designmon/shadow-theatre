@@ -55,3 +55,11 @@ describe('shadowMask with expected wall', () => {
     expect(bbox(m)).toEqual({ x: 200, y: 100, w: 60, h: 50 });
   });
 });
+
+import { litMask } from '../../src/vision/shadowMask';
+describe('litMask', () => {
+  it('marks the projected wall area', () => {
+    const ref = fillRect(gray(320, 240, 10), 30, 20, 260, 200, 180);
+    expect(bbox(litMask(ref))).toEqual({ x: 30, y: 20, w: 260, h: 200 });
+  });
+});
