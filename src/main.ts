@@ -13,6 +13,8 @@ import { projectBox, projectMask } from './vision/project';
 import { analyzeScene, type Scene } from './vision/scene';
 import { buildExpected, litMask, shadowMask } from './vision/shadowMask';
 import { installSimCamera } from './sim';
+import { recognize } from './recognize/client';
+import { maskToPng } from './vision/snapshot';
 
 const stage = createStage();
 if (new URLSearchParams(location.search).has('sim')) installSimCamera(() => stage.canvas);
@@ -24,6 +26,7 @@ let calib: Calibration | null = null;
 let lit: Mask | null = null;
 let calibrating = false;
 let status = 'not calibrated (press C)';
+let lastRec = '—';
 
 /** Union of what all creatures darken, mapped into camera space. */
 function projectedDarkInCamera(frame: Gray): Mask {
@@ -99,7 +102,13 @@ async function main() {
     if (calib) {
       mask = shadowMask(frame, buildExpected(calib.whiteRef, projectedDarkInCamera(frame)));
       scene = analyzeScene(mask, findBlobs(mask), lit ?? undefined);
-      if (scene && hold.push(scene.puppet, now)) spawnPeel(scene);
+      if (scene && hold.push(scene.puppet, now)) {
+        const peel = spawnPeel(scene);
+        maskToPng(scene.puppet, scene.puppetBox).then(recognize).then((rec) => {
+          lastRec = `${rec.kind} (${rec.confidence.toFixed(2)})`;
+          peel.resolve(rec);
+        });
+      }
       if (!scene) hold.reset();
     } else {
       mask = shadowMask(frame, null);
@@ -111,7 +120,7 @@ async function main() {
     clearWhite(stage);
     for (const c of creatures) c.draw(stage.ctx);
     if (debug) {
-      const lines = [status, scene ? `shadow from ${scene.entry ?? 'nowhere'} → open ${scene.openSide}` : 'no shadow', `${creatures.length} creature(s)`];
+      const lines = [status, scene ? `shadow from ${scene.entry ?? 'nowhere'} → open ${scene.openSide}` : 'no shadow', `${creatures.length} creature(s)`, `last seen: ${lastRec}`];
       if (recorder.recording) lines.push('● REC');
       drawDebug(stage.ctx, { frame, mask, fps, lines });
     }
