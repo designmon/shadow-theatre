@@ -40,3 +40,14 @@ describe.each(kinds)('%s', (kind) => {
     expect(m.data.reduce((s, v) => s + v, 0)).toBeGreaterThan(1000);
   });
 });
+
+describe('stage presence', () => {
+  it('a creature stays on the wall at least 3.5 s even near the edge', () => {
+    for (const kind of kinds) {
+      const c = createCreature(kind, { ...spawn, anchorBox: { x: 1300, y: 400, w: 100, h: 80 } });
+      let t = 0;
+      while (!c.done && t < 20000) { c.update(33); t += 33; }
+      expect(t).toBeGreaterThanOrEqual(3500);
+    }
+  });
+});

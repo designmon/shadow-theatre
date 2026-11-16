@@ -58,3 +58,20 @@ export function litMask(whiteRef: Gray, min = MIN_LIT): Mask {
   for (let i = 0; i < data.length; i++) data[i] = whiteRef.data[i] >= min ? 1 : 0;
   return { width: whiteRef.width, height: whiteRef.height, data };
 }
+
+/** Grow a mask by r pixels (square neighbourhood, separable). */
+export function dilate(m: Mask, r: number): Mask {
+  const { width: W, height: H } = m;
+  const tmp = new Uint8Array(W * H), out = new Uint8Array(W * H);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    let v = 0;
+    for (let k = Math.max(0, x - r); k <= Math.min(W - 1, x + r) && !v; k++) v = m.data[y * W + k];
+    tmp[y * W + x] = v;
+  }
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    let v = 0;
+    for (let k = Math.max(0, y - r); k <= Math.min(H - 1, y + r) && !v; k++) v = tmp[k * W + x];
+    out[y * W + x] = v;
+  }
+  return { width: W, height: H, data: out };
+}

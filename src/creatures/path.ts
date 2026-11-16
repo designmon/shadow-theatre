@@ -21,33 +21,52 @@ export function planPath(spawn: Spawn, seed = Date.now()): Pt[] {
   const rand = rng(seed);
   const { anchorBox: a, wall, avoid } = spawn;
   const d = DIRS[spawn.openSide];
-  const perp = { x: -d.y, y: d.x };
   const size = Math.max(a.w, a.h);
   const c = { x: a.x + a.w / 2, y: a.y + a.h / 2 };
-  const p1 = { x: c.x + d.x * size * 1.2, y: c.y + d.y * size * 1.2 };
-  // distance from p1 to the open edge, then beyond it by 1.5 sizes
-  const toEdge = d.x > 0 ? wall.w - p1.x : d.x < 0 ? p1.x : d.y > 0 ? wall.h - p1.y : p1.y;
-  const total = Math.max(0, toEdge) + size * 1.5;
-  const perpDim = perp.x !== 0 ? wall.w : wall.h;
+  const roomTo = (dir: { x: number; y: number }, p: Pt) =>
+    dir.x > 0 ? wall.w - p.x : dir.x < 0 ? p.x : dir.y > 0 ? wall.h - p.y : p.y;
+  const ahead = roomTo(d, c);
+  const p1Dist = Math.min(size * 1.2, Math.max(ahead - size * 0.6, size * 0.5));
+  const p1 = { x: c.x + d.x * p1Dist, y: c.y + d.y * p1Dist };
+  // Little room ahead (< 40% of the wall): turn along the wall toward the roomier side.
+  const alongDim = d.x !== 0 ? wall.w : wall.h;
+  let e = d;
+  if (ahead < 0.4 * alongDim) {
+    const perpA = { x: -d.y, y: d.x }, perpB = { x: d.y, y: -d.x };
+    e = roomTo(perpA, p1) >= roomTo(perpB, p1) ? perpA : perpB;
+  }
+  const q = { x: -e.y, y: e.x }; // wobble axis
+  const total = Math.max(0, roomTo(e, p1)) + size * 1.5;
+  const qDim = q.x !== 0 ? wall.w : wall.h;
   const margin = size * 0.6;
   const pts: Pt[] = [c, p1];
   const n = 4;
   for (let i = 1; i <= n; i++) {
     const along = (total * i) / n;
-    const wob = i === n ? 0 : (rand() * 2 - 1) * 0.12 * perpDim;
-    let p = { x: p1.x + d.x * along + perp.x * wob, y: p1.y + d.y * along + perp.y * wob };
-    // keep the cross-axis on the wall
-    if (perp.x !== 0) p.x = Math.min(wall.w - margin, Math.max(margin, p.x));
+    const wob = i === n ? 0 : (rand() * 2 - 1) * 0.12 * qDim;
+    let p = { x: p1.x + e.x * along + q.x * wob, y: p1.y + e.y * along + q.y * wob };
+    if (q.x !== 0) p.x = Math.min(wall.w - margin, Math.max(margin, p.x));
     else p.y = Math.min(wall.h - margin, Math.max(margin, p.y));
     if (avoid && inside(p, avoid, 12)) {
-      // push across the avoid box along the perpendicular, away from its center
+      // push across the avoid box along the wobble axis, away from its center
       const ac = { x: avoid.x + avoid.w / 2, y: avoid.y + avoid.h / 2 };
-      const s = (p.x - ac.x) * perp.x + (p.y - ac.y) * perp.y >= 0 ? 1 : -1;
-      const half = (perp.x !== 0 ? avoid.w : avoid.h) / 2 + 14;
-      const cur = (p.x - ac.x) * perp.x + (p.y - ac.y) * perp.y;
-      p = { x: p.x + perp.x * (s * half - cur), y: p.y + perp.y * (s * half - cur) };
+      const cur = (p.x - ac.x) * q.x + (p.y - ac.y) * q.y;
+      const sgn = cur >= 0 ? 1 : -1;
+      const half = (q.x !== 0 ? avoid.w : avoid.h) / 2 + 14;
+      p = { x: p.x + q.x * (sgn * half - cur), y: p.y + q.y * (sgn * half - cur) };
     }
     pts.push(p);
   }
   return pts;
+}
+
+export function pointAlong(path: Pt[], dist: number): Pt {
+  let left = dist;
+  for (let i = 1; i < path.length; i++) {
+    const a = path[i - 1], b = path[i];
+    const seg = Math.hypot(b.x - a.x, b.y - a.y);
+    if (left <= seg) return { x: a.x + ((b.x - a.x) * left) / seg, y: a.y + ((b.y - a.y) * left) / seg };
+    left -= seg;
+  }
+  return path[path.length - 1];
 }

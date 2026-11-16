@@ -5,7 +5,8 @@ export const swan: CreatureDef = {
   kind: 'swan',
   headBox: { x: -20, y: -18, w: 64, h: 96 },
   extent: { x: -150, y: -18, w: 200, h: 150 },
-  speed: 1.8,
+  speed: 1.1,
+  introMs: 500,
   flips: true,
   bob: (t) => ({ x: 0, y: Math.sin(t / 420) * 6 }),
   draw(ctx, t) {

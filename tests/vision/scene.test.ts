@@ -74,3 +74,28 @@ describe('analyzeScene: body standing on the bottom edge', () => {
     expect(s.puppetBox.y).toBeLessThanOrEqual(95);
   });
 });
+
+import { isUsablePuppet } from '../../src/vision/scene';
+describe('isUsablePuppet', () => {
+  const lit = fillRect(mask(W, H), 20, 20, 280, 200, 1);
+  const handScene = () => {
+    const m = mask(W, H);
+    fillRect(m, 20, 60, 40, 160, 1); fillRect(m, 60, 110, 120, 12, 1); fillRect(m, 170, 95, 30, 30, 1);
+    return analyzeScene(m, findBlobs(m), lit)!;
+  };
+
+  it('accepts a hand at the end of an arm', () => {
+    expect(isUsablePuppet(handScene(), mask(W, H), lit)).toBe(true);
+  });
+
+  it('rejects a puppet touching our own projected creature', () => {
+    const ours = fillRect(mask(W, H), 201, 90, 40, 40, 1); // creature right next to the hand
+    expect(isUsablePuppet(handScene(), ours, lit)).toBe(false);
+  });
+
+  it('rejects a puppet too big to be a hand', () => {
+    const m = fillRect(mask(W, H), 20, 20, 200, 200, 1); // whole body filling the wall
+    const s = analyzeScene(m, findBlobs(m), lit)!;
+    expect(isUsablePuppet(s, mask(W, H), lit)).toBe(false);
+  });
+});

@@ -1,6 +1,5 @@
 import type { Box, CreatureKind, Mask, Pt } from '../types';
-import { planPath } from './path';
-import { pointAlong } from './peel';
+import { planPath, pointAlong } from './path';
 import { applyShadowStyle } from './style';
 import type { Creature, Spawn } from './types';
 
@@ -15,6 +14,8 @@ export type CreatureDef = {
   extent: Box;
   /** Travel speed in head-sizes per second. */
   speed: number;
+  /** Time on the spot before it sets off (bark, crouch...). */
+  introMs: number;
   /** Whether it mirrors when travelling left. */
   flips: boolean;
   /** Extra offset in rig units (hops, bobs) at time t (ms). */
@@ -22,7 +23,7 @@ export type CreatureDef = {
   draw: (ctx: CanvasRenderingContext2D, t: number) => void;
 };
 
-const MIN_SPEED = 0.2; // px per ms
+const MIN_SPEED = 0.12; // px per ms
 
 export class RiggedCreature implements Creature {
   readonly kind: CreatureKind;
@@ -52,7 +53,7 @@ export class RiggedCreature implements Creature {
 
   update(dtMs: number): void {
     this.t += dtMs;
-    this.pos = Math.min(this.pathLen, this.pos + dtMs * this.speed);
+    if (this.t > this.def.introMs) this.pos = Math.min(this.pathLen, this.pos + dtMs * this.speed);
     const dx = pointAlong(this.path, this.pos + 5).x - pointAlong(this.path, this.pos).x;
     if (this.def.flips && Math.abs(dx) > 0.5) this.flip = dx < 0;
   }

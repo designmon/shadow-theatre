@@ -5,7 +5,8 @@ export const dog: CreatureDef = {
   kind: 'dog',
   headBox: { x: -32, y: -62, w: 90, h: 86 },
   extent: { x: -200, y: -62, w: 258, h: 150 },
-  speed: 2.4,
+  speed: 1.6,
+  introMs: 900,
   flips: true,
   bob: (t) => ({ x: 0, y: -Math.abs(Math.sin(t / 110)) * 5 }),
   draw(ctx, t) {

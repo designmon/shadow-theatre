@@ -64,3 +64,29 @@ export function analyzeScene(mask: Mask, blobs: Blob[], lit?: Mask): Scene | nul
   for (const i of tip) puppet.data[i] = 1;
   return { puppet, puppetBox: boxOf(tip, W)!, entry: opposite[openSide], openSide, bodyBox: boxOf(body, W) };
 }
+
+const MAX_PUPPET_FRACTION = 0.25; // of the lit wall
+const TOUCH_PX = 3;
+
+/**
+ * Whether a scene's puppet is a trustworthy hand shape: not partly hidden by
+ * (touching) one of our own projected creatures, and not so big it must be a body.
+ */
+export function isUsablePuppet(scene: Scene, ownDarkCam: Mask, lit: Mask): boolean {
+  let litArea = 0;
+  for (const v of lit.data) litArea += v;
+  const b = scene.puppetBox;
+  if (b.w * b.h > MAX_PUPPET_FRACTION * litArea) return false;
+  const W = ownDarkCam.width, H = ownDarkCam.height;
+  for (let y = Math.max(0, b.y - TOUCH_PX); y < Math.min(H, b.y + b.h + TOUCH_PX); y++) {
+    for (let x = Math.max(0, b.x - TOUCH_PX); x < Math.min(W, b.x + b.w + TOUCH_PX); x++) {
+      if (!ownDarkCam.data[y * W + x]) continue;
+      // is any puppet pixel within TOUCH_PX of this dark pixel?
+      for (let dy = -TOUCH_PX; dy <= TOUCH_PX; dy++) for (let dx = -TOUCH_PX; dx <= TOUCH_PX; dx++) {
+        const px = x + dx, py = y + dy;
+        if (px >= 0 && py >= 0 && px < W && py < H && scene.puppet.data[py * W + px]) return false;
+      }
+    }
+  }
+  return true;
+}

@@ -5,7 +5,8 @@ export const butterfly: CreatureDef = {
   kind: 'butterfly',
   headBox: { x: -70, y: -62, w: 140, h: 118 },
   extent: { x: -70, y: -62, w: 140, h: 118 },
-  speed: 2.6,
+  speed: 1.4,
+  introMs: 200,
   flips: false,
   bob: (t) => ({ x: Math.sin(t / 380) * 18, y: Math.sin(t / 170) * 22 }),
   draw(ctx, t) {

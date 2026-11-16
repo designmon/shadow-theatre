@@ -7,7 +7,8 @@ export const rabbit: CreatureDef = {
   kind: 'rabbit',
   headBox: { x: -30, y: -96, w: 60, h: 122 },
   extent: { x: -130, y: -96, w: 160, h: 170 },
-  speed: 2.2,
+  speed: 1.5,
+  introMs: 400,
   flips: true,
   bob: (t) => ({ x: 0, y: -Math.abs(Math.sin((t / HOP_MS) * Math.PI)) * 46 }),
   draw(ctx, t) {

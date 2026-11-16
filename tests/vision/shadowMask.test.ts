@@ -63,3 +63,11 @@ describe('litMask', () => {
     expect(bbox(litMask(ref))).toEqual({ x: 30, y: 20, w: 260, h: 200 });
   });
 });
+
+import { dilate } from '../../src/vision/shadowMask';
+describe('dilate', () => {
+  it('grows a mask by r pixels', () => {
+    const m = dilate(fillRect(mask(50, 50), 20, 20, 5, 5, 1), 2);
+    expect(bbox(m)).toEqual({ x: 18, y: 18, w: 9, h: 9 });
+  });
+});

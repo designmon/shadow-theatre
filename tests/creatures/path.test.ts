@@ -56,3 +56,15 @@ describe('planPath', () => {
     }
   });
 });
+
+describe('planPath with little room ahead', () => {
+  it('turns along the wall when the open side is short', () => {
+    const s: Spawn = { anchorBox: { x: 1620, y: 300, w: 160, h: 120 }, facing: 'right', openSide: 'right', wall, avoid: { x: 1000, y: 200, w: 300, h: 880 } };
+    const p = planPath(s, 5);
+    const end = p.at(-1)!;
+    expect(end.y < 0 || end.y > wall.h).toBe(true); // leaves through the top or bottom
+    for (const q of p) expect(q.x).toBeLessThanOrEqual(wall.w);
+    // goes toward the roomier side (the anchor is in the upper half -> down)
+    expect(end.y).toBeGreaterThan(wall.h);
+  });
+});

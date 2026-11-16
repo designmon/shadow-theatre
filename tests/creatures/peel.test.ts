@@ -40,3 +40,59 @@ describe('PeelOff', () => {
     expect(p.done).toBe(true);
   });
 });
+
+describe('PeelOff resolving into a creature', () => {
+  it('resolve(dog) morphs then runs', () => {
+    const p = new PeelOff(shape(), spawn);
+    run(p, 600);
+    p.resolve({ kind: 'dog', confidence: 0.9, facing: 'right', anchor: { x: 0.75, y: 0.4 } });
+    // anchor point in projector px, after the slide (box moved right by w + 8)
+    const ax = Math.round(anchorBox.x + 128 + 0.75 * anchorBox.w), ay = Math.round(anchorBox.y + 0.4 * anchorBox.h);
+    p.update(20);
+    expect(p.darkMask(1920, 1080).data[ay * 1920 + ax]).toBe(1); // creature head is where the hand's head was
+    run(p, 500);
+    expect(p.kind).toBe('dog');
+    expect(p.done).toBe(false);
+  });
+
+  it('resolving before the slide ends waits for the slide', () => {
+    const p = new PeelOff(shape(), spawn);
+    run(p, 200);
+    p.resolve({ kind: 'butterfly', confidence: 0.9, facing: 'up', anchor: { x: 0.5, y: 0.5 } });
+    run(p, 400);
+    const b = bbox(p.darkMask(1920, 1080));
+    expect(intersects(b, anchorBox)).toBe(false);
+  });
+
+  it('creature eventually leaves the wall', () => {
+    const p = new PeelOff(shape(), spawn);
+    run(p, 600);
+    p.resolve({ kind: 'rabbit', confidence: 0.9, facing: 'right', anchor: { x: 0.5, y: 0.3 } });
+    run(p, 15000);
+    expect(p.done).toBe(true);
+  });
+});
+
+describe('PeelOff near the open edge', () => {
+  it('slides at most half the remaining room', () => {
+    const box = { x: 1650, y: 400, w: 120, h: 90 };
+    const p = new PeelOff({ mask: fillRect(mask(120, 90), 0, 0, 120, 90, 1), box }, { ...spawn, anchorBox: box });
+    run(p, 600);
+    const b = bbox(p.darkMask(1920, 1080));
+    expect(b.x + b.w).toBeLessThanOrEqual(1920);
+    expect(b.x - box.x).toBeLessThanOrEqual(Math.ceil((1920 - (box.x + box.w)) / 2));
+  });
+});
+
+describe('creature size from the hand', () => {
+  it('sizes the creature head from the hand thickness, not the arm length', () => {
+    // a long arm + hand silhouette reaching right: 400 wide, 90 tall
+    const box = { x: 300, y: 400, w: 400, h: 90 };
+    const p = new PeelOff({ mask: fillRect(mask(400, 90), 0, 0, 400, 90, 1), box }, { ...spawn, anchorBox: box });
+    run(p, 600);
+    p.resolve({ kind: 'dog', confidence: 0.9, facing: 'right', anchor: { x: 0.9, y: 0.5 } });
+    run(p, 600);
+    const head = (p as any).creature.headBoxWorld();
+    expect(Math.max(head.w, head.h)).toBeLessThanOrEqual(100);
+  });
+});

@@ -1,5 +1,7 @@
 import type { Box, CreatureKind, Mask, Pt, Recognition } from '../types';
-import { planPath } from './path';
+import { createCreature } from './index';
+import { planPath, pointAlong } from './path';
+import type { RiggedCreature } from './rig';
 import { applyShadowStyle } from './style';
 import { DIRS, type Creature, type Spawn } from './types';
 
@@ -8,8 +10,9 @@ const WAIT_MS = 4000;
 const DRIFT_MS = 2000;
 const DRIFT_SPEED = 0.2; // px per ms
 const GAP = 8;
+const MORPH_MS = 500;
 
-type Phase = 'slide' | 'wait' | 'drift' | 'gone';
+type Phase = 'slide' | 'wait' | 'drift' | 'morph' | 'creature' | 'gone';
 
 const ease = (t: number) => (t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2);
 
@@ -26,14 +29,21 @@ export class PeelOff implements Creature {
   private sprite: OffscreenCanvas | null = null;
   protected readonly slideTo: Pt;
 
-  constructor(protected shape: { mask: Mask; box: Box }, protected spawn: Spawn) {
+  private creature: RiggedCreature | null = null;
+  private morphStart = 0;
+
+  /** `snapBox`: projector box of the image sent for recognition (anchor coords are relative to it). */
+  constructor(protected shape: { mask: Mask; box: Box }, protected spawn: Spawn, private snapBox: Box = shape.box) {
     const d = DIRS[spawn.openSide];
-    const dist = (d.x !== 0 ? shape.box.w : shape.box.h) + GAP;
+    const b = shape.box, { w, h } = spawn.wall;
+    // room between the shape's leading edge and the wall edge it is heading to
+    const room = d.x > 0 ? w - (b.x + b.w) : d.x < 0 ? b.x : d.y > 0 ? h - (b.y + b.h) : b.y;
+    const dist = Math.min((d.x !== 0 ? b.w : b.h) + GAP, Math.max(0, room / 2));
     this.slideTo = { x: d.x * dist, y: d.y * dist };
   }
 
   get done(): boolean {
-    return this.phase === 'gone';
+    return this.phase === 'gone' || (this.creature?.done ?? false);
   }
 
   resolve(rec: Recognition): void {
@@ -47,8 +57,34 @@ export class PeelOff implements Creature {
       this.offset = { x: this.slideTo.x * k, y: this.slideTo.y * k };
       if (this.t >= SLIDE_MS) this.phase = 'wait';
     }
-    if (this.phase === 'wait' && (this.resolution || this.t >= WAIT_MS)) this.startDrift();
+    if (this.phase === 'wait' && this.resolution && this.resolution.kind !== 'unknown') this.startCreature(this.resolution);
+    else if (this.phase === 'wait' && (this.resolution || this.t >= WAIT_MS)) this.startDrift();
     if (this.phase === 'drift') this.stepDrift(dtMs);
+    if (this.phase === 'morph' || this.phase === 'creature') {
+      this.creature!.update(dtMs);
+      const k = Math.min(1, (this.t - this.morphStart) / MORPH_MS);
+      this.alpha = 1 - k;
+      this.creature!.alpha = k;
+      if (k >= 1) this.phase = 'creature';
+    }
+  }
+
+  /** The creature takes over: its head lands where the recognized head is, on the slid silhouette. */
+  private startCreature(rec: Recognition) {
+    const kind = rec.kind as Exclude<CreatureKind, 'unknown'>;
+    const b = this.shape.box, sb = this.snapBox;
+    const ax = sb.x + rec.anchor.x * sb.w + this.offset.x, ay = sb.y + rec.anchor.y * sb.h + this.offset.y;
+    // head size = the hand's thickness across the reach direction (the arm only adds length)
+    const across = this.spawn.openSide === 'left' || this.spawn.openSide === 'right' ? b.h : b.w;
+    const size = kind === 'butterfly' ? Math.max(b.w, b.h) : Math.max(24, Math.min(across, 0.7 * Math.max(b.w, b.h)));
+    const anchorBox = kind === 'butterfly'
+      ? { x: b.x + this.offset.x, y: b.y + this.offset.y, w: b.w, h: b.h }
+      : { x: ax - size / 2, y: ay - size / 2, w: size, h: size };
+    this.creature = createCreature(kind, { ...this.spawn, anchorBox, facing: rec.facing });
+    this.creature.alpha = 0;
+    this.kind = kind;
+    this.phase = 'morph';
+    this.morphStart = this.t;
   }
 
   private startDrift() {
@@ -75,7 +111,7 @@ export class PeelOff implements Creature {
   private offsetAtDriftStart: Pt | null = null;
 
   darkMask(w: number, h: number): Mask {
-    const out: Mask = { width: w, height: h, data: new Uint8Array(w * h) };
+    const out: Mask = this.creature ? this.creature.darkMask(w, h) : { width: w, height: h, data: new Uint8Array(w * h) };
     if (this.phase === 'gone' || this.alpha < 0.5) return out;
     const { mask, box } = this.shape;
     const ox = Math.round(box.x + this.offset.x), oy = Math.round(box.y + this.offset.y);
@@ -89,23 +125,14 @@ export class PeelOff implements Creature {
 
   draw(ctx: CanvasRenderingContext2D): void {
     if (this.phase === 'gone') return;
+    this.creature?.draw(ctx);
+    if (this.alpha <= 0) return;
     if (!this.sprite) this.sprite = maskSprite(this.shape.mask);
     ctx.save();
     applyShadowStyle(ctx, this.alpha);
     ctx.drawImage(this.sprite, this.shape.box.x + this.offset.x, this.shape.box.y + this.offset.y);
     ctx.restore();
   }
-}
-
-export function pointAlong(path: Pt[], dist: number): Pt {
-  let left = dist;
-  for (let i = 1; i < path.length; i++) {
-    const a = path[i - 1], b = path[i];
-    const seg = Math.hypot(b.x - a.x, b.y - a.y);
-    if (left <= seg) return { x: a.x + ((b.x - a.x) * left) / seg, y: a.y + ((b.y - a.y) * left) / seg };
-    left -= seg;
-  }
-  return path[path.length - 1];
 }
 
 function maskSprite(mask: Mask): OffscreenCanvas {
