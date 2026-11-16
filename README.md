@@ -35,6 +35,23 @@ fullscreen on the projector.
 | D | debug view on/off (camera picture-in-picture, shadow in red) |
 | R | start/stop recording a clip (downloads a `.webm` to send back) |
 
+### First time in the room
+
+1. Start both `npm run dev` and `npm run server`, open the page, press **F**.
+   It re-calibrates by itself after going fullscreen (the wall flashes
+   black → four squares → white). **Stay out of the beam while it does.**
+2. The **debug view starts on** (top-left of the wall: what the camera sees,
+   your shadow in red). Check the whole wall is in view and your shadow is red.
+   Press **D** to hide it for the real show.
+3. Stand at one side, reach in, make a shape and hold it still for about a second.
+4. Watch the server terminal: it prints each answer and how long it took,
+   e.g. `dog (0.92) in 2140 ms`. If it's often over ~4 s, tell Claude — a
+   faster model may be worth it.
+5. Press **R** to record a few clips (one per creature) and send them back.
+
+If the projector gets bumped, it re-aligns by itself after a second; if that
+fails it asks you to step out of the beam and press **C**.
+
 ### Recognition key
 
 The server reads `ANTHROPIC_API_KEY` (or an `ant auth login` profile). Without
@@ -44,6 +61,12 @@ it, shapes still peel off and drift away; they just aren't recognized.
 export ANTHROPIC_API_KEY=sk-ant-...
 npm run server
 ```
+
+## Try it without a projector
+
+`http://localhost:5173/?sim=dog` (or `rabbit`, `butterfly`, `swan`) replaces
+the webcam with a simulator: it films the page like a camera and adds a fake
+arm and hand that reach in and hold still.
 
 ## Develop
 
