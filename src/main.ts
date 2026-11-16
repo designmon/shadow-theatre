@@ -3,7 +3,8 @@ import { grabGray, startCamera } from './camera';
 import { drawDebug } from './debug/overlay';
 import { Recorder } from './debug/recorder';
 import { clearWhite, createStage } from './stage';
-import { shadowMask } from './vision/shadowMask';
+import { buildExpected, shadowMask } from './vision/shadowMask';
+import type { Mask } from './types';
 
 const stage = createStage();
 const recorder = new Recorder();
@@ -45,7 +46,8 @@ async function main() {
     last = now;
     if (calibrating) return requestAnimationFrame(tick);
     const frame = grabGray(video);
-    const mask = shadowMask(frame, null);
+    const noDark: Mask = { width: frame.width, height: frame.height, data: new Uint8Array(frame.data.length) };
+    const mask = shadowMask(frame, calib ? buildExpected(calib.whiteRef, noDark) : null);
     clearWhite(stage);
     if (debug) drawDebug(stage.ctx, { frame, mask, fps, lines: [status, ...(recorder.recording ? ['● REC'] : [])] });
     requestAnimationFrame(tick);
