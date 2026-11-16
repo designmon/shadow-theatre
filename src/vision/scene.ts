@@ -1,9 +1,12 @@
 import type { Box, Mask, Side } from '../types';
 import type { Blob } from './blobs';
 
-export type Scene = { puppet: Mask; puppetBox: Box; entry: Side | null; openSide: Side; bodyBox: Box | null };
+/** neck: cross-width of the shadow just behind the puppet / the puppet's cross-width (null if nothing behind it). */
+export type Scene = { puppet: Mask; puppetBox: Box; entry: Side | null; openSide: Side; bodyBox: Box | null; neck: number | null };
 
 const TIP_FRACTION = 0.3;
+const NECK_BAND = 6; // px behind the puppet used to measure the wrist/neck
+const MAX_NECK = 0.75; // a hand sticks out from a narrower arm; a head-and-shoulders doesn't
 
 function boxOf(indices: Iterable<number>, W: number): Box | null {
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
@@ -38,7 +41,7 @@ export function analyzeScene(mask: Mask, blobs: Blob[], lit?: Mask): Scene | nul
     const b = blob.box;
     const gaps: Record<Side, number> = { left: b.x, right: W - (b.x + b.w), up: b.y, down: H - (b.y + b.h) };
     const openSide = sides.reduce((a, c) => (gaps[c] > gaps[a] ? c : a));
-    return { puppet, puppetBox: b, entry: null, openSide, bodyBox: null };
+    return { puppet, puppetBox: b, entry: null, openSide, bodyBox: null, neck: null };
   }
   ax /= n; ay /= n;
 
@@ -62,7 +65,17 @@ export function analyzeScene(mask: Mask, blobs: Blob[], lit?: Mask): Scene | nul
   const tip: number[] = [], body: number[] = [];
   for (const i of blob.pixels) (back(i) <= span ? tip : body).push(i);
   for (const i of tip) puppet.data[i] = 1;
-  return { puppet, puppetBox: boxOf(tip, W)!, entry: opposite[openSide], openSide, bodyBox: boxOf(body, W) };
+  // How wide is the shadow just behind the puppet (wrist / forearm vs. torso)?
+  const horizontal = openSide === 'left' || openSide === 'right';
+  const cross = (i: number) => (horizontal ? (i / W) | 0 : i % W);
+  const extent = (idx: number[]) => {
+    let lo = Infinity, hi = -Infinity;
+    for (const i of idx) { const c = cross(i); if (c < lo) lo = c; if (c > hi) hi = c; }
+    return hi < lo ? 0 : hi - lo + 1;
+  };
+  const band = body.filter((i) => back(i) <= span + NECK_BAND);
+  const neck = band.length ? extent(band) / Math.max(1, extent(tip)) : null;
+  return { puppet, puppetBox: boxOf(tip, W)!, entry: opposite[openSide], openSide, bodyBox: boxOf(body, W), neck };
 }
 
 const MAX_PUPPET_FRACTION = 0.25; // of the lit wall
@@ -77,6 +90,7 @@ export function isUsablePuppet(scene: Scene, ownDarkCam: Mask, lit: Mask): boole
   for (const v of lit.data) litArea += v;
   const b = scene.puppetBox;
   if (b.w * b.h > MAX_PUPPET_FRACTION * litArea) return false;
+  if (scene.neck !== null && scene.neck > MAX_NECK) return false; // not a protrusion: someone just standing there
   const W = ownDarkCam.width, H = ownDarkCam.height;
   for (let y = Math.max(0, b.y - TOUCH_PX); y < Math.min(H, b.y + b.h + TOUCH_PX); y++) {
     for (let x = Math.max(0, b.x - TOUCH_PX); x < Math.min(W, b.x + b.w + TOUCH_PX); x++) {

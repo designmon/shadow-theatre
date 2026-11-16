@@ -7,6 +7,8 @@ export interface Creature {
   update(dtMs: number): void;
   draw(ctx: CanvasRenderingContext2D): void;
   readonly done: boolean;
+  /** ms fully opaque so far (0 while fading). */
+  readonly steadyMs?: number;
   /** Projector pixels this creature currently darkens (so the camera ignores them). */
   darkMask(w: number, h: number): Mask;
 }

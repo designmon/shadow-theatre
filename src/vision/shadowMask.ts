@@ -52,11 +52,30 @@ export function buildExpected(whiteRef: Gray, projectedDarkCam: Mask): Gray {
   return { width: whiteRef.width, height: whiteRef.height, data };
 }
 
-/** Where the projector actually lights the wall, in camera space. */
-export function litMask(whiteRef: Gray, min = MIN_LIT): Mask {
-  const data = new Uint8Array(whiteRef.data.length);
-  for (let i = 0; i < data.length; i++) data[i] = whiteRef.data[i] >= min ? 1 : 0;
+/**
+ * Where the projector actually lights the wall, in camera space. With a `dark`
+ * frame (projector showing black), uses how much the projector *adds* to each
+ * pixel, so spill light / boosted exposure around the wall doesn't count.
+ */
+export function litMask(whiteRef: Gray, dark?: Gray, min = MIN_LIT): Mask {
+  const n = whiteRef.data.length;
+  const data = new Uint8Array(n);
+  if (!dark) {
+    for (let i = 0; i < n; i++) data[i] = whiteRef.data[i] >= min ? 1 : 0;
+    return { width: whiteRef.width, height: whiteRef.height, data };
+  }
+  const diff = new Uint8ClampedArray(n);
+  for (let i = 0; i < n; i++) diff[i] = whiteRef.data[i] - dark.data[i];
+  const thr = Math.max(15, 0.25 * percentile(diff, 0.95));
+  for (let i = 0; i < n; i++) data[i] = diff[i] >= thr ? 1 : 0;
   return { width: whiteRef.width, height: whiteRef.height, data };
+}
+
+/** Shrink a mask by r pixels. */
+export function erode(m: Mask, r: number): Mask {
+  const inv: Mask = { width: m.width, height: m.height, data: m.data.map((v) => 1 - v) };
+  const grown = dilate(inv, r);
+  return { width: m.width, height: m.height, data: grown.data.map((v) => 1 - v) };
 }
 
 /** Grow a mask by r pixels (square neighbourhood, separable). */

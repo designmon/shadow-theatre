@@ -12,6 +12,8 @@ export const RecognitionSchema = z.object({
 
 export const UNKNOWN: Recognition = { kind: 'unknown', confidence: 0, facing: 'right', anchor: { x: 0.5, y: 0.5 } };
 const MIN_CONFIDENCE = 0.5;
+/** Fail fast: the browser gives up at 6 s, so don't keep retrying (and billing) after that. */
+export const CLIENT_OPTIONS = { timeout: 6000, maxRetries: 0 };
 
 const SYSTEM = `You look at hand shadows. The image is a black silhouette on white, cast on a wall by a person's hands and forearm in a shadow-puppet show. A wrist or forearm may extend to the image edge.
 

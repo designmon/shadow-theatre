@@ -1,9 +1,9 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { createServer } from 'node:http';
-import { handleRecognize, type RecognizeClient } from './recognize';
+import { CLIENT_OPTIONS, handleRecognize, type RecognizeClient } from './recognize';
 
 const PORT = Number(process.env.PORT ?? 8787);
-const client = new Anthropic() as unknown as RecognizeClient;
+const client = new Anthropic(CLIENT_OPTIONS) as unknown as RecognizeClient;
 
 createServer(async (req, res) => {
   if (req.method !== 'POST' || req.url !== '/api/recognize') {

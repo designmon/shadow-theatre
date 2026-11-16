@@ -1,6 +1,7 @@
 import { runCalibration, type Calibration } from './calibration/calibrate';
 import { alignmentScore } from './calibration/alignment';
 import { warpMask } from './calibration/homography';
+import { debounce, MisalignmentWatch } from './calibration/watch';
 import { grabGray, startCamera } from './camera';
 import { PeelOff } from './creatures/peel';
 import type { Creature } from './creatures/types';
@@ -13,7 +14,7 @@ import { HoldDetector } from './vision/hold';
 import { projectBox, projectMask } from './vision/project';
 import { analyzeScene, isUsablePuppet, type Scene } from './vision/scene';
 import { setBlur } from './creatures/style';
-import { buildExpected, dilate, litMask, shadowMask } from './vision/shadowMask';
+import { buildExpected, dilate, erode, litMask, shadowMask } from './vision/shadowMask';
 import { installSimCamera } from './sim';
 import { recognize } from './recognize/client';
 import { maskToPng } from './vision/snapshot';
@@ -29,7 +30,8 @@ let lit: Mask | null = null;
 let calibrating = false;
 let status = 'not calibrated (press C)';
 let lastRec = '—';
-let misaligned = 0;
+const watch = new MisalignmentWatch();
+const STEADY_MS = 300; // only check creatures that have been fully opaque this long (camera/projector lag)
 let darkPx = 0;
 const countOnes = (m: Mask) => { let n = 0; for (const v of m.data) n += v; return n; };
 
@@ -37,7 +39,7 @@ const DARK_SCALE = 0.25; // render creatures at quarter size to find what we act
 let darkCanvas: OffscreenCanvas | null = null;
 
 /** What we actually project dark (creatures as drawn, plus the debug overlay), in camera space. */
-function projectedDarkInCamera(frame: Gray, withOverlay = true): Mask {
+function projectedDarkInCamera(frame: Gray, withOverlay = true, steadyOnly = false): Mask {
   const { w, h } = stage.size();
   const dw = Math.ceil(w * DARK_SCALE), dh = Math.ceil(h * DARK_SCALE);
   if (!darkCanvas || darkCanvas.width !== dw || darkCanvas.height !== dh) darkCanvas = new OffscreenCanvas(dw, dh);
@@ -46,7 +48,7 @@ function projectedDarkInCamera(frame: Gray, withOverlay = true): Mask {
   dctx.clearRect(0, 0, dw, dh);
   dctx.setTransform(DARK_SCALE, 0, 0, DARK_SCALE, 0, 0);
   setBlur(false); // the mask pass doesn't need the soft edge (and blur is slow)
-  for (const c of creatures) c.draw(dctx);
+  for (const c of creatures) if (!steadyOnly || (c.steadyMs ?? 0) >= STEADY_MS) c.draw(dctx);
   setBlur(true);
   dctx.setTransform(1, 0, 0, 1, 0, 0);
   const rgba = dctx.getImageData(0, 0, dw, dh).data;
@@ -86,20 +88,26 @@ function spawnPeel(scene: Scene): PeelOff {
 async function main() {
   const { video, stream } = await startCamera();
 
-  const calibrate = async () => {
+  const calibrate = async (auto = false) => {
     if (calibrating) return;
     calibrating = true;
     try {
-      calib = await runCalibration(stage, video);
-      lit = litMask(calib.whiteRef);
-      status = 'calibrated';
+      // automatic re-alignment: the performer is probably in the beam, so keep the reference frames
+      calib = await runCalibration(stage, video, auto && calib ? calib : undefined);
+      lit = litMask(calib.whiteRef, calib.dark);
+      status = auto ? 're-aligned' : 'calibrated';
       hold.reset();
     } catch (err) {
-      status = String((err as Error).message ?? err);
+      status = auto ? 'projector moved? step out of the beam and press C' : String((err as Error).message ?? err);
+      if (auto) watch.failed(performance.now());
     } finally {
       calibrating = false;
     }
   };
+  // fullscreen / window changes alter the stage size: the old mapping is stale
+  const recalibrateSoon = debounce(() => calibrate(), 800);
+  window.addEventListener('resize', recalibrateSoon);
+  document.addEventListener('fullscreenchange', recalibrateSoon);
 
   window.addEventListener('keydown', (e) => {
     const k = e.key.toLowerCase();
@@ -129,10 +137,9 @@ async function main() {
       mask = shadowMask(frame, buildExpected(calib.whiteRef, dark));
       // self-healing: if our creatures stop showing up where we project them, the projector moved
       const own = creatures.length ? projectedDarkInCamera(frame, false) : null;
-      if (own && countOnes(own) >= 1500) {
-        misaligned = alignmentScore(frame, calib.whiteRef, own) < 0.5 ? misaligned + 1 : 0;
-        if (misaligned >= 15) { misaligned = 0; status = 'projector moved — recalibrating'; calibrate(); return; }
-      } else misaligned = 0;
+      const steady = creatures.length ? erode(projectedDarkInCamera(frame, false, true), 2) : null;
+      const score = steady && countOnes(steady) >= 1000 ? alignmentScore(frame, calib.whiteRef, steady) : null;
+      if (watch.push(score, now)) { status = 'projector moved — re-aligning'; calibrate(true); return; }
       scene = analyzeScene(mask, findBlobs(mask), lit ?? undefined);
       const usable = scene && lit && isUsablePuppet(scene, own ?? { width: frame.width, height: frame.height, data: new Uint8Array(frame.data.length) }, lit);
       if (scene && usable && hold.push(scene.puppet, now)) {

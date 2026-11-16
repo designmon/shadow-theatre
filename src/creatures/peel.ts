@@ -6,7 +6,7 @@ import { applyShadowStyle } from './style';
 import { DIRS, type Creature, type Spawn } from './types';
 
 const SLIDE_MS = 600;
-const WAIT_MS = 4000;
+export const WAIT_MS = 6500; // a bit longer than the recognition timeout
 const DRIFT_MS = 2000;
 const DRIFT_SPEED = 0.2; // px per ms
 const GAP = 8;
@@ -44,6 +44,13 @@ export class PeelOff implements Creature {
 
   get done(): boolean {
     return this.phase === 'gone' || (this.creature?.done ?? false);
+  }
+
+  /** How long it has been fully opaque (0 while fading/morphing) — for the alignment check. */
+  get steadyMs(): number {
+    if (this.phase === 'slide' || this.phase === 'wait') return this.t;
+    if (this.phase === 'creature') return this.t - (this.morphStart + MORPH_MS);
+    return 0;
   }
 
   /** Forward a nearby hand to the creature (once there is one). */

@@ -26,7 +26,7 @@ describe('PeelOff', () => {
 
   it('unresolved peel finishes as unknown', () => {
     const p = new PeelOff(shape(), spawn);
-    run(p, 6100);
+    run(p, 8600); // waits WAIT_MS (6.5 s) for recognition, then drifts away for 2 s
     expect(p.kind).toBe('unknown');
     expect(p.done).toBe(true);
     expect(count(p.darkMask(1920, 1080))).toBe(0);
@@ -106,5 +106,19 @@ describe('butterfly size from the hand', () => {
     run(p, 50);
     const head = (p as any).creature.headBoxWorld();
     expect(Math.max(head.w, head.h)).toBeLessThanOrEqual(130);
+  });
+});
+
+import { RECOGNIZE_TIMEOUT_MS } from '../../src/recognize/client';
+import { WAIT_MS } from '../../src/creatures/peel';
+describe('review I7: latency budget', () => {
+  it('the peel waits longer than the recognition request may take', () => {
+    expect(RECOGNIZE_TIMEOUT_MS).toBeGreaterThanOrEqual(6000);
+    expect(WAIT_MS).toBeGreaterThan(RECOGNIZE_TIMEOUT_MS);
+  });
+  it('steadyMs counts time fully opaque', () => {
+    const p = new PeelOff(shape(), spawn);
+    run(p, 400);
+    expect(p.steadyMs).toBeGreaterThanOrEqual(380);
   });
 });

@@ -36,3 +36,10 @@ describe('handleRecognize', () => {
     expect(await handleRecognize(png, client)).toEqual({ kind: 'unknown', confidence: 0, facing: 'right', anchor: { x: 0.5, y: 0.5 } });
   });
 });
+
+import { CLIENT_OPTIONS } from '../../server/recognize';
+describe('review I7: server client options', () => {
+  it('does not keep retrying requests the browser gave up on', () => {
+    expect(CLIENT_OPTIONS).toEqual({ timeout: 6000, maxRetries: 0 });
+  });
+});

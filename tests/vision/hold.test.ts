@@ -65,3 +65,15 @@ describe('HoldDetector after a fire', () => {
     expect(fired.length).toBe(2);
   });
 });
+
+describe('review I1: next pose in the same spot', () => {
+  it('re-arms once the fired pose was left, even if the next pose is in the same place', () => {
+    const d = new HoldDetector({ cooldownMs: 0 });
+    const fired: number[] = [];
+    for (let t = 0; t <= 800; t += 33) if (d.push(sq(100), t)) fired.push(t);
+    for (let t = 833, x = 0; t <= 2000; t += 33, x += 9) d.push(sq(x % 250), t); // hand moves around
+    const rabbit = fillRect(fillRect(mask(320, 240), 100, 110, 40, 30, 1), 105, 90, 8, 20, 1); // similar spot, new shape
+    for (let t = 2033; t <= 3500; t += 33) if (d.push(rabbit, t)) fired.push(t);
+    expect(fired.length).toBe(2);
+  });
+});

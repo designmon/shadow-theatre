@@ -5,7 +5,7 @@ import type { Gray, H } from '../types';
 import { invertH, solveHomography } from './homography';
 import { drawCalibrationPattern, findMarkers } from './pattern';
 
-export type Calibration = { camToProj: H; projToCam: H; whiteRef: Gray };
+export type Calibration = { camToProj: H; projToCam: H; whiteRef: Gray; dark: Gray };
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -26,21 +26,40 @@ async function grabAveraged(video: HTMLVideoElement, n = 5): Promise<Gray> {
   return { width, height, data };
 }
 
-export async function runCalibration(stage: Stage, video: HTMLVideoElement): Promise<Calibration> {
+/** Wait (up to 2 s) until the webcam's auto-exposure has stopped changing the picture. */
+async function settle(video: HTMLVideoElement): Promise<void> {
+  const mean = () => { const g = grabGray(video, 80, 60); let s = 0; for (const v of g.data) s += v; return s / g.data.length; };
+  await wait(300);
+  let prev = mean();
+  for (let t = 0; t < 2000; t += 150) {
+    await wait(150);
+    const m = mean();
+    if (Math.abs(m - prev) <= Math.max(1, prev * 0.02)) return;
+    prev = m;
+  }
+}
+
+/**
+ * Full calibration: homography + white/dark reference frames. With `keep`
+ * (automatic re-alignment, the performer may be in the beam) only the
+ * homography is redone and the reference frames are kept.
+ */
+export async function runCalibration(stage: Stage, video: HTMLVideoElement, keep?: Calibration): Promise<Calibration> {
   const { w, h } = stage.size();
   stage.ctx.setTransform(1, 0, 0, 1, 0, 0);
   stage.ctx.fillStyle = '#000';
   stage.ctx.fillRect(0, 0, w, h);
-  await wait(400);
+  await settle(video);
   const dark = await grabAveraged(video);
   const centers = drawCalibrationPattern(stage.ctx, w, h);
   await wait(400);
   const lit = await grabAveraged(video);
   const cam = findMarkers(lit, dark);
   if (!cam) throw new Error('Could not see the 4 calibration squares — is the whole wall in the camera view?');
-  clearWhite(stage);
-  await wait(400);
-  const whiteRef = await grabAveraged(video);
   const camToProj = solveHomography(cam, centers);
-  return { camToProj, projToCam: invertH(camToProj), whiteRef };
+  clearWhite(stage);
+  if (keep) return { ...keep, camToProj, projToCam: invertH(camToProj) };
+  await settle(video);
+  const whiteRef = await grabAveraged(video);
+  return { camToProj, projToCam: invertH(camToProj), whiteRef, dark };
 }

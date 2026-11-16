@@ -30,6 +30,8 @@ export class HoldDetector {
   }
 
   push(puppet: Mask, tMs: number): boolean {
+    // once the fired pose has clearly been left, the next pose may fire (even in the same spot)
+    if (this.firedRef && iou(this.firedRef, puppet) < HoldDetector.REARM_IOU) this.firedRef = null;
     if (!this.ref || iou(this.ref, puppet) < this.minIou) {
       this.ref = puppet;
       this.since = tMs;

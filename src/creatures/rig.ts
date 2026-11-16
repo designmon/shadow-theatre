@@ -26,6 +26,8 @@ export type CreatureDef = {
 const MIN_SPEED = 0.12; // px per ms
 const FLEE_MS = 800;
 const FLEE_SPEED = 0.35; // px per ms
+const SHY_GRACE_MS = 1000; // after the intro, before it starts minding hands
+const MAX_SHOVE = 1.5; // head sizes
 
 export class RiggedCreature implements Creature {
   readonly kind: CreatureKind;
@@ -39,6 +41,7 @@ export class RiggedCreature implements Creature {
   private speed: number;
 
   flee: { dir: Pt; until: number } | null = null;
+  private lastHandDist: number | null = null;
   private shove: Pt = { x: 0, y: 0 };
 
   constructor(private def: CreatureDef, spawn: Spawn, seed?: number) {
@@ -61,6 +64,9 @@ export class RiggedCreature implements Creature {
     if (this.t > this.def.introMs) this.pos = Math.min(this.pathLen, this.pos + dtMs * this.speed);
     if (this.flee) {
       this.shove = { x: this.shove.x + this.flee.dir.x * FLEE_SPEED * dtMs, y: this.shove.y + this.flee.dir.y * FLEE_SPEED * dtMs };
+      const max = MAX_SHOVE * this.scale * Math.max(this.def.headBox.w, this.def.headBox.h);
+      const m = Math.hypot(this.shove.x, this.shove.y);
+      if (m > max) this.shove = { x: (this.shove.x * max) / m, y: (this.shove.y * max) / m };
       if (this.t >= this.flee.until) this.flee = null;
     }
     const dx = pointAlong(this.path, this.pos + 5).x - pointAlong(this.path, this.pos).x;
@@ -73,7 +79,11 @@ export class RiggedCreature implements Creature {
     const hc = { x: h.x + h.w / 2, y: h.y + h.h / 2 }, bc = { x: box.x + box.w / 2, y: box.y + box.h / 2 };
     const reach = Math.max(h.w, h.h) + Math.max(box.w, box.h) / 2;
     const dx = hc.x - bc.x, dy = hc.y - bc.y, d = Math.hypot(dx, dy);
+    const prev = this.lastHandDist;
+    this.lastHandDist = d;
+    if (this.t < this.def.introMs + SHY_GRACE_MS) return; // don't run from the hand that just made you
     if (d > reach * 1.5 || this.flee) return;
+    if (prev === null || prev - d < 10) return; // only a hand that is coming closer
     this.flee = { dir: d > 0 ? { x: dx / d, y: dy / d } : { x: 0, y: -1 }, until: this.t + FLEE_MS };
   }
 

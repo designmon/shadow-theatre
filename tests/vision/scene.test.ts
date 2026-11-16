@@ -99,3 +99,26 @@ describe('isUsablePuppet', () => {
     expect(isUsablePuppet(s, mask(W, H), lit)).toBe(false);
   });
 });
+
+describe('review I2: standing still is not a puppet', () => {
+  const lit = fillRect(mask(W, H), 20, 20, 280, 200, 1);
+  it('rejects the top of a body that just stands there', () => {
+    const m = fillRect(mask(W, H), 120, 90, 60, 130, 1); // body touching the bottom of the wall
+    const s = analyzeScene(m, findBlobs(m), lit)!;
+    expect(isUsablePuppet(s, mask(W, H), lit)).toBe(false);
+  });
+  it('rejects head and shoulders', () => {
+    const m = mask(W, H);
+    fillRect(m, 110, 120, 80, 100, 1); // torso
+    fillRect(m, 135, 90, 30, 30, 1);   // head
+    const s = analyzeScene(m, findBlobs(m), lit)!;
+    expect(isUsablePuppet(s, mask(W, H), lit)).toBe(false);
+  });
+  it('accepts a forearm swan rising from the bottom', () => {
+    const m = mask(W, H);
+    fillRect(m, 150, 130, 14, 90, 1); // forearm from the bottom edge
+    fillRect(m, 150, 112, 34, 20, 1); // hand bent as head + beak
+    const s = analyzeScene(m, findBlobs(m), lit)!;
+    expect(isUsablePuppet(s, mask(W, H), lit)).toBe(true);
+  });
+});

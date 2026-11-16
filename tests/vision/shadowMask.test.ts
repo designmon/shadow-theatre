@@ -71,3 +71,18 @@ describe('dilate', () => {
     expect(bbox(m)).toEqual({ x: 18, y: 18, w: 9, h: 9 });
   });
 });
+
+describe('review I4: lit wall from white minus dark', () => {
+  it('spill-lit surroundings are not part of the wall', () => {
+    const white = fillRect(gray(320, 240, 70), 30, 20, 260, 200, 200); // surround brightened by auto-exposure
+    const dark = gray(320, 240, 62);
+    expect(bbox(litMask(white, dark))).toEqual({ x: 30, y: 20, w: 260, h: 200 });
+  });
+});
+
+import { erode } from '../../src/vision/shadowMask';
+describe('erode', () => {
+  it('shrinks a mask by r pixels', () => {
+    expect(bbox(erode(fillRect(mask(50, 50), 10, 10, 20, 20, 1), 3))).toEqual({ x: 13, y: 13, w: 14, h: 14 });
+  });
+});
