@@ -1,13 +1,15 @@
-import { grabGray } from '../camera';
+import { grabFrame } from '../camera';
 import type { Stage } from '../stage';
 import { clearWhite } from '../stage';
 import type { Gray, H } from '../types';
 import { invertH, solveHomography, wallMask } from './homography';
 import { findBlobs } from '../vision/blobs';
+import { dilate } from '../vision/shadowMask';
 import type { Mask } from '../types';
 import { drawCalibrationPattern, findMarkersDetailed } from './pattern';
 
-export type Calibration = { camToProj: H; projToCam: H; whiteRef: Gray; dark: Gray; method?: 'squares' | 'picture' };
+/** whiteRef / dark: strongest-channel references for finding shadows. whiteLuma / darkLuma: ordinary brightness, for where the picture is. */
+export type Calibration = { camToProj: H; projToCam: H; whiteRef: Gray; dark: Gray; whiteLuma?: Gray; darkLuma?: Gray; method?: 'squares' | 'picture' };
 
 /** Calibration failed: carries what the camera saw, for the setup card. */
 export class CalibrationError extends Error {
@@ -23,28 +25,35 @@ export class CalibrationError extends Error {
 // The projector (keystone processing) and webcam both lag; wait longer on the retry.
 const PATTERN_WAITS_MS = [900, 1600];
 
+/** The last calibration's camera frames (ordinary brightness), for saving when it fails. */
+export let lastCalibrationFrames: { dark: Gray; squares: Gray; white: Gray } | null = null;
+
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Average several frames to suppress projector (DLP) flicker. */
-async function grabAveraged(video: HTMLVideoElement, n = 5): Promise<Gray> {
-  const frames: Gray[] = [];
+type Pair = { bright: Gray; luma: Gray };
+async function grabAveraged(video: HTMLVideoElement, n = 5): Promise<Pair> {
+  const frames: Pair[] = [];
   for (let i = 0; i < n; i++) {
-    frames.push(grabGray(video));
+    frames.push(grabFrame(video));
     await wait(40);
   }
-  const { width, height } = frames[0];
-  const data = new Uint8ClampedArray(width * height);
-  for (let i = 0; i < data.length; i++) {
-    let s = 0;
-    for (const f of frames) s += f.data[i];
-    data[i] = s / n;
-  }
-  return { width, height, data };
+  const avg = (key: keyof Pair): Gray => {
+    const { width, height } = frames[0][key];
+    const data = new Uint8ClampedArray(width * height);
+    for (let i = 0; i < data.length; i++) {
+      let s = 0;
+      for (const f of frames) s += f[key].data[i];
+      data[i] = s / n;
+    }
+    return { width, height, data };
+  };
+  return { bright: avg('bright'), luma: avg('luma') };
 }
 
 /** Wait (up to 2 s) until the webcam's auto-exposure has stopped changing the picture. */
 async function settle(video: HTMLVideoElement): Promise<void> {
-  const mean = () => { const g = grabGray(video, 80, 60); let s = 0; for (const v of g.data) s += v; return s / g.data.length; };
+  const mean = () => { const g = grabFrame(video, 80, 60).luma; let s = 0; for (const v of g.data) s += v; return s / g.data.length; };
   await wait(300);
   let prev = mean();
   for (let t = 0; t < 2000; t += 150) {
@@ -70,7 +79,7 @@ export async function runCalibration(stage: Stage, video: HTMLVideoElement, keep
   // First with the squares near the corners; if that doesn't add up (part of the picture is outside
   // the camera view, low contrast), again with the squares further inside the picture.
   let solved: ReturnType<typeof solveCalibration> | null = null;
-  let whiteRef: Gray = dark;
+  let white: Pair = dark;
   let lastErr: unknown = null;
   for (const [inset, ms] of [[0.12, PATTERN_WAITS_MS[0]], [0.28, PATTERN_WAITS_MS[1]]] as const) {
     const centers = drawCalibrationPattern(stage.ctx, w, h, inset);
@@ -78,9 +87,11 @@ export async function runCalibration(stage: Stage, video: HTMLVideoElement, keep
     const lit = await grabAveraged(video);
     clearWhite(stage);
     await settle(video);
-    whiteRef = await grabAveraged(video);
+    white = await grabAveraged(video);
     try {
-      solved = solveCalibration(dark, lit, whiteRef, centers, w, h);
+      // where things are: ordinary brightness (see grabFrame)
+      lastCalibrationFrames = { dark: dark.luma, squares: lit.luma, white: white.luma };
+      solved = solveCalibration(dark.luma, lit.luma, white.luma, centers, w, h);
       break;
     } catch (err) {
       lastErr = err;
@@ -93,7 +104,7 @@ export async function runCalibration(stage: Stage, video: HTMLVideoElement, keep
   if (!solved) throw lastErr;
   console.log('[shadow] calibrated using', solved.method);
   if (keep) return { ...keep, camToProj: solved.camToProj, projToCam: solved.projToCam, method: solved.method };
-  return { camToProj: solved.camToProj, projToCam: solved.projToCam, whiteRef, dark, method: solved.method };
+  return { camToProj: solved.camToProj, projToCam: solved.projToCam, whiteRef: white.bright, dark: dark.bright, whiteLuma: white.luma, darkLuma: dark.luma, method: solved.method };
 }
 
 const MIN_AGREEMENT = 0.75; // IoU between "where we think the picture is" and "what actually lit up"
@@ -130,11 +141,18 @@ export function solveCalibration(dark: Gray, patternLit: Gray, white: Gray, cent
   if (markers.points) {
     // Squares: the bright picture must fall inside where they say the wall is (a stray light
     // taken for a square fails this), while a dim corner (lamp nearby) may stay unlit.
+    // The camera also sees a glow around the bright picture (light bouncing off nearby surfaces,
+    // the camera's own bloom), which can read as "picture" in a lamp-lit room: allow a margin
+    // around the wall for it. A stray light taken for a square puts the wall far off, not a bit off.
     const h = solveHomography(markers.points, centers);
     const m = wallMask(h, projW, projH, W, Hh);
-    let inter = 0, pic = 0, wall = 0;
-    for (let i = 0; i < n; i++) { inter += m.data[i] & picture.data[i]; pic += picture.data[i]; wall += m.data[i]; }
-    if (pic && wall && inter / pic >= 0.85 && inter / wall >= 0.55) return accept(h, 'squares');
+    let wall = 0;
+    for (let i = 0; i < n; i++) wall += m.data[i];
+    const near = dilate(m, Math.max(4, Math.round(0.1 * Math.sqrt(wall))));
+    let inter = 0, interNear = 0, pic = 0;
+    for (let i = 0; i < n; i++) { inter += m.data[i] & picture.data[i]; interNear += near.data[i] & picture.data[i]; pic += picture.data[i]; }
+    if (pic && wall && interNear / pic >= 0.85 && inter / wall >= 0.55) return accept(h, 'squares');
+    console.log(`[shadow] squares vs picture: ${Math.round((100 * interNear) / pic)}% of the bright picture near the wall (need 85), ${Math.round((100 * inter) / wall)}% of the wall bright (need 55)`);
   }
   // corners of the bright picture: only if the whole picture is in view (cut-off corners aren't corners)
   const t = blob.touches;

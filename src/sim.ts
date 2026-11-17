@@ -65,6 +65,18 @@ export function installSimCamera(stage: () => HTMLCanvasElement): void {
       drawHand(ctx, pose, 0, 0);
       ctx.restore();
     }
+    if (params.has('warm')) {
+      // warm lamps (like a real living room): orange light, strongest on the left, added on top —
+      // the red channel runs into the top of the camera's range before the projector adds anything
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      const g = ctx.createLinearGradient(0, 0, 640, 0);
+      g.addColorStop(0, `rgba(235,150,60,${params.get('warm') || 0.85})`);
+      g.addColorStop(1, `rgba(200,120,50,${0.5 * Number(params.get('warm') || 0.85)})`);
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, 640, 480);
+      ctx.restore();
+    }
     if (params.has('ambient')) {
       // room light: everything gets brighter, so shadows are only a bit darker than the wall
       ctx.fillStyle = `rgba(200,200,200,${params.get('ambient') || 0.6})`;

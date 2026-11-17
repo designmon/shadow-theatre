@@ -1,4 +1,4 @@
-import { CalibrationError, calibrationWarning, runCalibration, type Calibration } from './calibration/calibrate';
+import { CalibrationError, calibrationWarning, lastCalibrationFrames, runCalibration, type Calibration } from './calibration/calibrate';
 import { alignmentScore } from './calibration/alignment';
 import { wallMask, warpMask } from './calibration/homography';
 import { debounce, MisalignmentWatch } from './calibration/watch';
@@ -214,8 +214,8 @@ async function main() {
       calib = await runCalibration(stage, video, auto && calib ? calib : undefined);
       // only the projected picture counts as wall: never the room around it
       const wall = wallMask(calib.camToProj, stage.size().w, stage.size().h, calib.whiteRef.width, calib.whiteRef.height);
-      lit = litMask(calib.whiteRef, calib.dark);
-      const blocked = calibrationWarning(wall, lit, calib.whiteRef);
+      lit = litMask(calib.whiteLuma ?? calib.whiteRef, calib.darkLuma ?? calib.dark); // where the picture reaches: ordinary brightness
+      const blocked = calibrationWarning(wall, lit, calib.whiteLuma ?? calib.whiteRef);
       const litBefore = countOnes(lit);
       for (let i = 0; i < lit.data.length; i++) lit.data[i] &= wall.data[i];
       lit = wallInterior(lit, 3); // the border between picture and bare wall is not a shadow
@@ -232,6 +232,7 @@ async function main() {
       const why = err instanceof CalibrationError ? err.message : String((err as Error).message ?? err);
       checklist.wall('fail', auto ? 'projector moved — step out of the beam, press C' : `${why} — then press C`, performance.now());
       if (err instanceof CalibrationError) panel!.showCalibrationView(err.seen, err.lit, err.changed);
+      void saveCalibrationFrames(why);
       if (auto) watch.failed(performance.now());
       if (!auto) panel!.show(true); // bring the help back on failure
     } finally {
@@ -389,3 +390,19 @@ async function main() {
 main().catch((err) => {
   document.body.insertAdjacentHTML('beforeend', `<pre style="position:fixed;top:40%;left:5%;color:#c00">Camera error: ${String(err)}</pre>`);
 });
+
+/** A failed calibration: save what the camera saw (projector black | squares | white) to captures/calibration/. */
+async function saveCalibrationFrames(why: string): Promise<void> {
+  const f = lastCalibrationFrames;
+  if (!f) return;
+  const { width: w, height: h } = f.dark;
+  const c = new OffscreenCanvas(w * 3, h);
+  const ctx = c.getContext('2d')!;
+  [f.dark, f.squares, f.white].forEach((g, k) => {
+    const img = ctx.createImageData(w, h);
+    for (let i = 0; i < g.data.length; i++) { img.data[i * 4] = img.data[i * 4 + 1] = img.data[i * 4 + 2] = g.data[i]; img.data[i * 4 + 3] = 255; }
+    ctx.putImageData(img, k * w, 0);
+  });
+  const png = await c.convertToBlob({ type: 'image/png' });
+  await fetch(`/api/calibration?why=${encodeURIComponent(why.slice(0, 120))}`, { method: 'POST', body: png }).catch(() => {});
+}

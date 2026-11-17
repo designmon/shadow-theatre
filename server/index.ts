@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { createServer } from 'node:http';
-import { saveCapture, saveDoodle } from './captures';
+import { saveCalibrationFrames, saveCapture, saveDoodle } from './captures';
 import { handleHealth, type HealthClient } from './health';
 import { jevHealth, MODEL, recognizeDoodleWithJev, recognizeWithJev } from './jev';
 import { CLIENT_OPTIONS, handleRecognize, UNKNOWN, type RecognizeClient } from './recognize';
@@ -28,6 +28,16 @@ createServer(async (req, res) => {
     console.log(`[doodle] ${rec.what} → ${rec.motion} (${rec.confidence.toFixed(2)}) in ${ms} ms${rec.note ? '  — ' + rec.note : ''}`);
     try { saveDoodle('captures/doodles', png, rec.what, rec.motion, ms, MODEL); } catch { /* saving is best-effort */ }
     return json(rec);
+  }
+  if (req.method === 'POST' && req.url?.startsWith('/api/calibration')) {
+    const chunks: Buffer[] = [];
+    for await (const c of req) chunks.push(c as Buffer);
+    const why = new URL(req.url, 'http://x').searchParams.get('why') ?? '';
+    try {
+      const file = saveCalibrationFrames('captures/calibration', Buffer.concat(chunks), why);
+      console.log(`[calibration] failed — camera frames saved to captures/calibration/${file}`);
+    } catch { /* best-effort */ }
+    return json({ ok: true });
   }
   if (req.method !== 'POST' || req.url !== '/api/recognize') {
     res.writeHead(404).end();

@@ -20,3 +20,12 @@ export function saveDoodle(dir: string, png: Buffer, what: string, motion: strin
   appendFileSync(join(dir, 'log.txt'), `${file}\t${what}\t${motion}\t${ms}ms\t${model}\n`);
   return file;
 }
+
+/** A failed calibration's camera frames (projector black | squares | white), to see what went wrong. */
+export function saveCalibrationFrames(dir: string, png: Buffer, why: string, at = new Date()): string {
+  mkdirSync(dir, { recursive: true });
+  const file = `${at.toISOString().replace(/[:.]/g, '-')}.png`;
+  writeFileSync(join(dir, file), png);
+  appendFileSync(join(dir, 'log.txt'), `${file}\t${why}\n`);
+  return file;
+}
