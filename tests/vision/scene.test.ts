@@ -212,6 +212,21 @@ describe('hand pose: point (draw), fist (finish), open (pen lifted)', () => {
     const m = arm(); fillRect(m, 105, 100, 28, 30, 1); fillRect(m, 133, 102, 30, 5, 1); fillRect(m, 133, 118, 30, 5, 1);
     expect(pose(m)).toBe('open');
   });
+  it('a big shadow (hand near the projector) with only the hand in the light, from below: point', () => {
+    // like the real wall: the arm is below the picture, the finger's shadow is fat
+    const m = mask(W, H);
+    fillRect(m, 120, 172, 44, 48, 1); // palm, cut off by the picture's bottom edge
+    fillRect(m, 164, 182, 10, 14, 1); // thumb knuckle
+    fillRect(m, 134, 112, 16, 60, 1); // a fat index finger pointing up
+    const s = analyzeScene(m, findBlobs(m), lit)!;
+    expect(s.pose).toBe('point');
+    expect(s.tip.y).toBeLessThan(118);
+  });
+  it('a big fist from below is still a fist', () => {
+    const m = mask(W, H);
+    fillRect(m, 118, 160, 50, 60, 1);
+    expect(pose(m)).toBe('fist');
+  });
   it('a flat hand, fingers together and stretched out, is open', () => {
     const m = arm(); fillRect(m, 105, 104, 60, 18, 1);
     expect(pose(m)).toBe('open');

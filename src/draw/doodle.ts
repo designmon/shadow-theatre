@@ -5,6 +5,7 @@ const INK_W = 7; // matches the pen's settled ink (render.ts)
 import type { Creature } from '../creatures/types';
 import type { Box, Mask, Pt } from '../types';
 import { refineStroke } from './refine';
+import { fitIcon, type IconStroke } from './icons';
 
 /** How a drawing comes alive. */
 export const MOTIONS = ['fly', 'swim', 'slither', 'hop', 'walk', 'sway', 'float', 'beat', 'twinkle', 'spin'] as const;
@@ -23,6 +24,7 @@ export function motionFor(what: string, guess: Motion): Motion {
 
 const SETTLE_MS = 700; // the raw line melts into the refined one
 const BEAUTIFY_MS = 700; // a heart / star / circle eases toward its ideal shape
+const REDRAW_MS = 1300; // the clean drawing of what it is draws itself over your lines
 const WAKE_MS = 900; // motion eases in
 const PERFORM_MS = 4000; // a little performance, then it goes to rest in its place
 const MOVE_MS = 1700; // walking to its place / back up
@@ -103,6 +105,8 @@ export class Doodle implements Creature {
   private facing = 1;
   private retireAt: number | null = null;
   private fade = 1;
+  private clean: IconStroke[] | null = null; // the clean drawing of what it is (local coords)
+  private redrawAt = Infinity;
 
   constructor(drawn: Pt[][], private wall: { w: number; h: number }) {
     const prepared = drawn.filter((s) => s.length >= 2).map((s) => {
@@ -147,7 +151,12 @@ export class Doodle implements Creature {
     this.label = label;
     this.aliveAt = Math.max(this.t, SETTLE_MS);
     this.beautifyAt = this.aliveAt;
-    if (this.strokes.length === 1 && this.strokes[0].closed) this.strokes[0].ideal = fitIdeal(label, this.strokes[0].base);
+    // a clean drawing of what it is, fitted over your lines; otherwise gently refine simple shapes
+    const pts = this.strokes.flatMap((st) => st.base), xs = pts.map((p) => p.x), ys = pts.map((p) => p.y);
+    const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+    this.clean = fitIcon(label, { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, w: x1 - x0, h: y1 - y0 });
+    if (this.clean) this.redrawAt = this.aliveAt;
+    else if (this.strokes.length === 1 && this.strokes[0].closed) this.strokes[0].ideal = fitIdeal(label, this.strokes[0].base);
     this.phase = 'performing';
     this.phaseAt = this.aliveAt;
   }
@@ -208,8 +217,21 @@ export class Doodle implements Creature {
     return { x: o.x * amount, y: o.y * amount };
   }
 
-  /** The drawing's strokes right now. */
+  /** How far the clean drawing has drawn itself (0..1). */
+  private redrawK(): number {
+    const k = Math.min(1, Math.max(0, (this.t - this.redrawAt) / REDRAW_MS));
+    return k * k * (3 - 2 * k);
+  }
+
+  /** The drawing's visible strokes right now. */
   points(): Pt[][] {
+    const f = this.frame(), k = this.redrawK();
+    if (!f.clean.length) return f.user;
+    return k >= 1 ? f.clean : [...f.user, ...f.clean];
+  }
+
+  /** Your strokes and the clean drawing's strokes, placed and animated. */
+  private frame(): { user: Pt[][]; clean: Pt[][] } {
     const settle = Math.min(1, this.t / SETTLE_MS), se = settle * settle * (3 - 2 * settle);
     const bk = Math.min(1, Math.max(0, (this.t - this.beautifyAt) / BEAUTIFY_MS)), be = bk * bk * (3 - 2 * bk) * 0.6;
     const m = this.motion, t = Math.max(0, this.t - this.aliveAt), s = this.size;
@@ -233,25 +255,30 @@ export class Doodle implements Creature {
     if (m === 'hop') { const ph = (t / 800) % 1, land = Math.max(0, 1 - Math.abs(ph - 0.98) * 12); sy = 1 - 0.12 * land * performing; sx = 1 + 0.08 * land * performing; }
     if (this.phase === 'parked') scale *= 1 + Math.sin(this.t / 1200) * 0.015; // resting: a gentle breath
     const cos = Math.cos(rot), sin = Math.sin(rot);
-    const pivotY = m === 'sway' ? Math.max(...this.strokes.flatMap((st) => st.base.map((p) => p.y))) : 0;
-    return this.strokes.map((st) => st.base.map((b0, i) => {
-      const r = st.raw[i];
-      const ideal = st.ideal?.[i];
-      const bx = ideal ? b0.x + (ideal.x - b0.x) * be : b0.x, by = ideal ? b0.y + (ideal.y - b0.y) * be : b0.y;
-      let x = r.x + (bx - r.x) * se, y = r.y + (by - r.y) * se;
-      x *= flip;
+    const pivotY = m === 'sway' ? Math.max(...(this.clean ? this.clean.flatMap((st) => st.pts.map((p) => p.y)) : this.strokes.flatMap((st) => st.base.map((p) => p.y)))) : 0;
+    const put = (x0: number, y0: number): Pt => {
+      let x = x0 * flip, y = y0;
       if (m === 'fly') x *= 1 - (1 - Math.abs(Math.cos(t / 150))) * 0.6 * wake;
       if (m === 'swim') y += Math.sin((x / s) * Math.PI * 2 - t / 200) * s * 0.06 * wake;
       if (m === 'slither') y += Math.sin((x / s) * Math.PI * 3 - t / 260) * s * 0.11 * wake;
       x *= sx * scale; y *= sy * scale;
       const ry = y - pivotY * scale;
       return { x: c.x + o.x + x * cos - ry * sin, y: c.y + o.y + pivotY * scale + x * sin + ry * cos + bob };
+    };
+    const user = this.strokes.map((st) => st.base.map((b0, i) => {
+      const r = st.raw[i];
+      const ideal = st.ideal?.[i];
+      const bx = ideal ? b0.x + (ideal.x - b0.x) * be : b0.x, by = ideal ? b0.y + (ideal.y - b0.y) * be : b0.y;
+      return put(r.x + (bx - r.x) * se, r.y + (by - r.y) * se);
     }));
+    const clean = this.clean ? this.clean.map((st) => st.pts.map((p) => put(p.x, p.y))) : [];
+    return { user, clean };
   }
 
   draw(ctx: CanvasRenderingContext2D): void {
     if (this.done) return;
-    const strokes = this.points();
+    const { user, clean } = this.frame();
+    const k = this.clean ? this.redrawK() : 0;
     const { scale } = this.placement();
     ctx.save();
     applyShadowStyle(ctx, this.fade);
@@ -260,14 +287,40 @@ export class Doodle implements Creature {
     ctx.lineWidth = Math.max(3.5, INK_W * Math.sqrt(scale)); // same weight as the pen's ink; a little lighter at rest
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
-    const fillOne = strokes.length === 1 && this.strokes[0].closed;
-    for (const pts of strokes) {
-      ctx.beginPath();
-      pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
-      if (fillOne) { ctx.closePath(); ctx.fill(); }
-      ctx.stroke();
+    // your lines, fading as the clean drawing draws itself over them
+    if (k < 1) {
+      ctx.globalAlpha = this.fade * (1 - k);
+      const fillOne = user.length === 1 && this.strokes[0].closed && !this.clean;
+      for (const pts of user) {
+        ctx.beginPath();
+        pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+        if (fillOne) { ctx.closePath(); ctx.fill(); }
+        ctx.stroke();
+      }
     }
-    if (this.motion === 'walk' && this.phase !== 'parked' && this.t > this.aliveAt) {
+    if (clean.length && k > 0) {
+      // drawn on along its length, like a pen
+      ctx.globalAlpha = this.fade;
+      const lens = clean.map((pts, si) => { let L = 0; for (let i = 1; i < pts.length; i++) L += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y); if (this.clean![si].closed) L += Math.hypot(pts[0].x - pts[pts.length - 1].x, pts[0].y - pts[pts.length - 1].y); return L; });
+      let budget = k * lens.reduce((a, b) => a + b, 0);
+      clean.forEach((pts, si) => {
+        if (budget <= 0) return;
+        const st = this.clean![si], full = budget >= lens[si];
+        const path = st.closed ? [...pts, pts[0]] : pts;
+        ctx.beginPath();
+        ctx.moveTo(path[0].x, path[0].y);
+        let left = budget;
+        for (let i = 1; i < path.length && left > 0; i++) {
+          const a = path[i - 1], b = path[i], d = Math.hypot(b.x - a.x, b.y - a.y);
+          if (d <= left) { ctx.lineTo(b.x, b.y); left -= d; } else { const f = left / d; ctx.lineTo(a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f); left = 0; }
+        }
+        if (full && st.fill) { ctx.closePath(); ctx.fill(); }
+        ctx.stroke();
+        budget -= lens[si];
+      });
+    }
+    ctx.globalAlpha = this.fade;
+    if (this.motion === 'walk' && !this.clean && this.phase !== 'parked' && this.t > this.aliveAt) {
       const b = this.box(), t = this.t - this.aliveAt;
       for (const [k, ph] of [[0.35, 0], [0.65, Math.PI]] as const) {
         const x = b.x + b.w * k, y = b.y + b.h, a = Math.sin(t / 160 + ph) * 0.5;

@@ -45,7 +45,8 @@ const sparkles = new Sparkles();
 const PUPPETS = false;
 let penState: PenState = { mode: 'idle', arm: 0, cursor: null, strokes: [] };
 const ROW_SLOTS = 9; // drawings rest in a row along the bottom of the wall
-let hovered: { d: Doodle; since: number; seen: number } | null = null; // a resting drawing the fingertip points at
+let hovered: { d: Doodle; since: number; seen: number } | null = null;
+let rawTip: { x: number; y: number } | null = null; // where the camera sees the fingertip this frame (debug: a small +) // a resting drawing the fingertip points at
 const WAKE_DWELL_MS = 500;
 let lastPointingAt = -Infinity;
 const POINTING_QUIET_MS = 1500; // a finger seen pointing recently is a pen, never a puppet
@@ -312,6 +313,7 @@ async function main() {
         const dx = tipProj.x - back.x, dy = tipProj.y - back.y, d = Math.hypot(dx, dy) || 1;
         dirProj = { x: dx / d, y: dy / d }; // which way the finger points, on the wall
       }
+      rawTip = tipProj;
       // pointing at a resting drawing (pen not in use): hover, then wake it — and don't start the pen
       // (any hand but a fist: the fingertip lands on the drawing's own ink, where its shadow can't be seen)
       const found = tipProj && scene && scene.pose !== 'fist' && (penState.mode === 'idle' || penState.mode === 'arming')
@@ -377,6 +379,14 @@ async function main() {
     clearWhite(stage);
     for (const c of creatures) c.draw(stage.ctx);
     drawPen(stage.ctx, penState);
+    if (debug && rawTip) {
+      // where the camera sees your fingertip right now: on your finger = mapping is right; the pen
+      // dot trailing behind it = camera delay; the + itself off your finger = re-calibrate (C)
+      const c = stage.ctx;
+      c.save(); c.strokeStyle = 'rgba(255,45,135,0.95)'; c.lineWidth = 2;
+      c.beginPath(); c.moveTo(rawTip.x - 10, rawTip.y); c.lineTo(rawTip.x + 10, rawTip.y); c.moveTo(rawTip.x, rawTip.y - 10); c.lineTo(rawTip.x, rawTip.y + 10); c.stroke();
+      c.restore();
+    }
     sparkles.draw(stage.ctx);
     if (hovered) {
       // a resting drawing under the fingertip: a ring fills up, then it wakes

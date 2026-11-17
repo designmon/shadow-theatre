@@ -226,7 +226,14 @@ function pointingFinger(pixels: Int32Array, dist: Int32Array, far: number, W: nu
   for (const i of end) { cx += i % W; cy += (i / W) | 0; }
   cx = cx / Math.max(1, end.length) + 0.5; cy = cy / Math.max(1, end.length) + 0.5;
   const dx = tip.x - cx, dy = tip.y - cy, d = Math.hypot(dx, dy) || 1;
-  const pointing = pieces === 1 && end.length <= L * fingerW * 1.1 && far > 1.6 * L; // a finger sticking out of something
+  // A finger sticking out of something. Either thin for this wall, or — when the hand is near the
+  // projector and its shadow is big — clearly narrower than the hand behind it (scale-free).
+  let back = 0;
+  for (const i of pixels) if (dist[i] >= far - 3 * L && dist[i] < far - 2 * L) back++;
+  const endW = end.length / L, backW = back / L;
+  const thin = end.length <= L * fingerW * 1.1;
+  const narrowerThanHand = backW > 0 && endW <= 0.5 * backW;
+  const pointing = pieces === 1 && far > 1.6 * L && (thin || narrowerThanHand);
   if ((globalThis as any).__trace) (globalThis as any).__finger = { pieces, end: end.length, maxEnd: L * fingerW * 1.1, far, L, fingerW, wallSize };
   return { pointing, tip, tipDir: { x: dx / d, y: dy / d }, pieces };
 }
