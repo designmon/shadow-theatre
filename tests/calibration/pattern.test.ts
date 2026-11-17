@@ -38,3 +38,38 @@ describe('findMarkers', () => {
     expect(findMarkers(renderLit(centers.slice(0, 3), projToCam), gray(320, 240, 25))).toBeNull();
   });
 });
+
+import { findMarkersDetailed } from '../../src/calibration/pattern';
+import { fillRect } from '../helpers';
+
+describe('findMarkers in a real room', () => {
+  it('ignores a bigger stray bright spot (lamp reflection)', () => {
+    const lit = renderLit(centers, projToCam);
+    fillRect(lit, 140, 100, 40, 30, 240); // big bright patch in the middle that changed between frames
+    const got = findMarkers(lit, gray(320, 240, 25));
+    expect(got).not.toBeNull();
+    got!.forEach((p, i) => {
+      const want = applyH(projToCam, centers[i]);
+      expect(Math.hypot(p.x - want.x, p.y - want.y)).toBeLessThan(1.5);
+    });
+  });
+
+  it('finds small squares when the picture is small in the camera view', () => {
+    const lit = gray(320, 240, 25);
+    for (const [x, y] of [[120, 90], [200, 90], [200, 150], [120, 150]]) fillRect(lit, x, y, 3, 3, 200);
+    expect(findMarkers(lit, gray(320, 240, 25))).not.toBeNull();
+  });
+
+  it('works with a weak but clear difference (dim projector)', () => {
+    const lit = gray(320, 240, 60);
+    for (const [x, y] of [[40, 40], [270, 40], [270, 190], [40, 190]]) fillRect(lit, x, y, 10, 10, 80);
+    expect(findMarkers(lit, gray(320, 240, 60))).not.toBeNull();
+  });
+
+  it('reports how many squares it saw, and the picture of what changed', () => {
+    const r = findMarkersDetailed(renderLit(centers.slice(0, 3), projToCam), gray(320, 240, 25));
+    expect(r.points).toBeNull();
+    expect(r.seen).toBe(3);
+    expect(r.changed.width).toBe(320);
+  });
+});

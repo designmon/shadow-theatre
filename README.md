@@ -49,6 +49,11 @@ fullscreen on the projector.
    - **Recognition**: ✓ when `npm run server` is running and Claude accepts your key.
    - **Your shadow**: ✓ once it sees your hand in the light (shown red in the camera view).
 
+   If calibration fails, the card says how many of the 4 squares it saw and
+   shows the camera picture from that moment, with what lit up in red.
+   Usual fixes: make the room dark, step out of the beam, get the whole
+   projected picture into the camera view, then press **C**.
+
    When all four are green the panel fades out. **S** brings it back,
    **D** shows a small debug view instead.
 3. Stand at one side, reach in, make a shape and hold it still for about a second.

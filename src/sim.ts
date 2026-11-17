@@ -25,6 +25,8 @@ export function installSimCamera(stage: () => HTMLCanvasElement): void {
     ctx.filter = 'brightness(0.85)';
     ctx.drawImage(stage(), 0, 0, 640, 480);
     ctx.restore();
+    // ?cover: someone standing in front of the top-right of the wall the whole time
+    if (params.has('cover')) { ctx.fillStyle = '#080808'; ctx.fillRect(470, 20, 170, 200); }
     // performer appears after calibration (~3 s), reaches in, holds, leaves
     const cycle = (t - 3) % 9;
     if (t > 3 && cycle < 6) {

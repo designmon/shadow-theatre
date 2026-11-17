@@ -3,9 +3,22 @@ import type { Stage } from '../stage';
 import { clearWhite } from '../stage';
 import type { Gray, H } from '../types';
 import { invertH, solveHomography } from './homography';
-import { drawCalibrationPattern, findMarkers } from './pattern';
+import type { Mask } from '../types';
+import { drawCalibrationPattern, findMarkersDetailed } from './pattern';
 
 export type Calibration = { camToProj: H; projToCam: H; whiteRef: Gray; dark: Gray };
+
+/** Calibration failed: carries what the camera saw, for the setup card. */
+export class CalibrationError extends Error {
+  constructor(readonly seen: number, readonly lit: Gray, readonly changed: Mask) {
+    super(seen === 0
+      ? "can't see the projected squares at all — is the camera pointing at the projected picture?"
+      : `only saw ${seen} of the 4 squares — make sure the whole picture is in view and nothing blocks the light`);
+  }
+}
+
+// The projector (keystone processing) and webcam both lag; wait longer on the retry.
+const PATTERN_WAITS_MS = [900, 1600];
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -52,10 +65,17 @@ export async function runCalibration(stage: Stage, video: HTMLVideoElement, keep
   await settle(video);
   const dark = await grabAveraged(video);
   const centers = drawCalibrationPattern(stage.ctx, w, h);
-  await wait(400);
-  const lit = await grabAveraged(video);
-  const cam = findMarkers(lit, dark);
-  if (!cam) throw new Error('Could not see the 4 calibration squares — is the whole wall in the camera view?');
+  let cam = null, lit: Gray = dark, result = null;
+  for (const ms of PATTERN_WAITS_MS) {
+    await wait(ms);
+    lit = await grabAveraged(video);
+    result = findMarkersDetailed(lit, dark);
+    if ((cam = result.points)) break;
+  }
+  if (!cam) {
+    clearWhite(stage);
+    throw new CalibrationError(result!.seen, lit, result!.changed);
+  }
   const camToProj = solveHomography(cam, centers);
   clearWhite(stage);
   if (keep) return { ...keep, camToProj, projToCam: invertH(camToProj) };

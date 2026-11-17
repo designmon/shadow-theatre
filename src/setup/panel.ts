@@ -12,7 +12,6 @@ export class SetupPanel {
   private list: HTMLUListElement;
   private preview: HTMLCanvasElement;
   private picker: HTMLSelectElement;
-  private img: ImageData | null = null;
   visible = true;
 
   constructor(onPickCamera: (id: string) => void) {
@@ -23,12 +22,25 @@ export class SetupPanel {
       <ul></ul>
       <label class="cam">Camera <select></select></label>
       <canvas width="320" height="240"></canvas>
+      <div class="diag" hidden><p></p><canvas width="320" height="240"></canvas></div>
       <p class="keys">C calibrate · S show/hide this · D debug · F fullscreen</p>`;
     document.body.appendChild(this.root);
     this.list = this.root.querySelector('ul')!;
     this.preview = this.root.querySelector('canvas')!;
     this.picker = this.root.querySelector('select')!;
     this.picker.addEventListener('change', () => onPickCamera(this.picker.value));
+  }
+
+  /** After a failed calibration: what the camera saw while the squares were up (bright changes in red). */
+  showCalibrationView(seen: number, lit: Gray, changed: Mask): void {
+    const box = this.root.querySelector<HTMLDivElement>('.diag')!;
+    box.hidden = false;
+    box.querySelector('p')!.textContent = `While the 4 squares were on the wall, the camera saw this (what lit up in red: ${seen} of 4 found):`;
+    paint(box.querySelector('canvas')!, lit, changed);
+  }
+
+  hideCalibrationView(): void {
+    this.root.querySelector<HTMLDivElement>('.diag')!.hidden = true;
   }
 
   setCameras(cams: MediaDeviceInfo[], currentLabel: string): void {
@@ -55,15 +67,7 @@ export class SetupPanel {
 
   /** Camera view with what it reads as shadow in red. */
   drawCamera(frame: Gray, mask: Mask): void {
-    if (this.preview.width !== frame.width) { this.preview.width = frame.width; this.preview.height = frame.height; }
-    if (!this.img || this.img.width !== frame.width) this.img = new ImageData(frame.width, frame.height);
-    const d = this.img.data;
-    for (let i = 0, j = 0; j < frame.data.length; i += 4, j++) {
-      const v = frame.data[j];
-      if (mask.data[j]) { d[i] = 230; d[i + 1] = v >> 2; d[i + 2] = v >> 2; } else { d[i] = d[i + 1] = d[i + 2] = v; }
-      d[i + 3] = 255;
-    }
-    this.preview.getContext('2d')!.putImageData(this.img, 0, 0);
+    paint(this.preview, frame, mask);
   }
 
   /** Where the panel sits on the stage, in stage (device) pixels — excluded from shadow detection. */
@@ -72,6 +76,19 @@ export class SetupPanel {
     const r = this.root.getBoundingClientRect();
     return { x: r.x * devicePixelRatio, y: r.y * devicePixelRatio, w: r.width * devicePixelRatio, h: r.height * devicePixelRatio };
   }
+}
+
+/** Gray camera picture with `mask` in red. */
+function paint(canvas: HTMLCanvasElement, frame: Gray, mask: Mask): void {
+  if (canvas.width !== frame.width) { canvas.width = frame.width; canvas.height = frame.height; }
+  const img = new ImageData(frame.width, frame.height);
+  const d = img.data;
+  for (let i = 0, j = 0; j < frame.data.length; i += 4, j++) {
+    const v = frame.data[j];
+    if (mask.data[j]) { d[i] = 230; d[i + 1] = v >> 2; d[i + 2] = v >> 2; } else { d[i] = d[i + 1] = d[i + 2] = v; }
+    d[i + 3] = 255;
+  }
+  canvas.getContext('2d')!.putImageData(img, 0, 0);
 }
 
 function escape(s: string): string {

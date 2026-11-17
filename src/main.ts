@@ -1,4 +1,4 @@
-import { runCalibration, type Calibration } from './calibration/calibrate';
+import { CalibrationError, runCalibration, type Calibration } from './calibration/calibrate';
 import { alignmentScore } from './calibration/alignment';
 import { warpMask } from './calibration/homography';
 import { debounce, MisalignmentWatch } from './calibration/watch';
@@ -129,6 +129,7 @@ async function main() {
     const panelWasVisible = panel!.visible;
     panel!.show(false); // the calibration pattern must not be covered
     checklist.wall('pending', 'calibrating — stay out of the beam…');
+    panel!.hideCalibrationView();
     try {
       // automatic re-alignment: the performer is probably in the beam, so keep the reference frames
       calib = await runCalibration(stage, video, auto && calib ? calib : undefined);
@@ -138,7 +139,9 @@ async function main() {
       hold.reset();
     } catch (err) {
       status = auto ? 'projector moved? step out of the beam and press C' : String((err as Error).message ?? err);
-      checklist.wall('fail', auto ? 'projector moved — step out of the beam, press C' : "can't see the projected squares — aim the camera at the whole picture, press C", performance.now());
+      const why = err instanceof CalibrationError ? err.message : String((err as Error).message ?? err);
+      checklist.wall('fail', auto ? 'projector moved — step out of the beam, press C' : `${why} — then press C`, performance.now());
+      if (err instanceof CalibrationError) panel!.showCalibrationView(err.seen, err.lit, err.changed);
       if (auto) watch.failed(performance.now());
       if (!auto) panel!.show(true); // bring the help back on failure
     } finally {
@@ -159,7 +162,9 @@ async function main() {
     if (k === 'c') calibrate();
     if (k === 's') panel!.show(!panel!.visible);
   });
-  setTimeout(calibrate, 800);
+  // Calibrate once the page is fullscreen on the projector (fullscreenchange triggers it); C forces it.
+  checklist.wall('pending', 'drag this window onto the projector screen, click it, press F');
+  if (document.fullscreenElement || new URLSearchParams(location.search).has('sim')) setTimeout(calibrate, 800);
 
   let last = performance.now();
   let fps = 0;
