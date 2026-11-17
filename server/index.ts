@@ -7,7 +7,13 @@ import { CLIENT_OPTIONS, handleRecognize, UNKNOWN, type RecognizeClient } from '
 
 const PORT = Number(process.env.PORT ?? 8787);
 // Jev (OpenRouter) when an OpenRouter key is set, otherwise Claude.
-const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY;
+// tolerate a pasted key with spaces or quotes around it
+const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY?.trim().replace(/^['"]|['"]$/g, '') || undefined;
+if (OPENROUTER_KEY) {
+  // never print the key: just enough to spot a placeholder or a cut-off paste
+  const looksRight = OPENROUTER_KEY.startsWith('sk-or-') && OPENROUTER_KEY.length > 40;
+  console.log(`OpenRouter key: starts ${OPENROUTER_KEY.slice(0, 6)}…, ${OPENROUTER_KEY.length} characters${looksRight ? '' : '  ⚠ that does not look like an OpenRouter key (they start sk-or- and are ~70 characters)'}`);
+}
 console.log(OPENROUTER_KEY ? `recognition: ${MODEL} on OpenRouter` : 'recognition: Claude (set OPENROUTER_API_KEY to use Jev)');
 let anthropic: Anthropic | null = null;
 try {
