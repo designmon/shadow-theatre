@@ -36,6 +36,8 @@ const watch = new MisalignmentWatch();
 const STEADY_MS = 300; // only check creatures that have been fully opaque this long (camera/projector lag)
 let darkPx = 0;
 let whyIgnored: string | null = null;
+let calibInfo = '';
+let shadowInfo = '';
 const countOnes = (m: Mask) => { let n = 0; for (const v of m.data) n += v; return n; };
 const checklist = new Checklist();
 let panel: SetupPanel | null = null;
@@ -148,7 +150,12 @@ async function main() {
       // only the projected picture counts as wall: never the room around it
       const wall = wallMask(calib.camToProj, stage.size().w, stage.size().h, calib.whiteRef.width, calib.whiteRef.height);
       lit = litMask(calib.whiteRef, calib.dark);
+      const litBefore = countOnes(lit);
       for (let i = 0; i < lit.data.length; i++) lit.data[i] &= wall.data[i];
+      // diagnostics for the debug view: what the calibration thinks the wall is
+      const n = lit.data.length, med = (g: Gray) => { const v: number[] = []; for (let i = 0; i < n; i += 5) if (lit!.data[i]) v.push(g.data[i]); v.sort((a, b) => a - b); return v.length ? v[v.length >> 1] : 0; };
+      calibInfo = `wall ${Math.round((100 * countOnes(wall)) / n)}% of view · lit ${Math.round((100 * litBefore) / n)}% → ${Math.round((100 * countOnes(lit)) / n)}% · white ${med(calib.whiteRef)} / black ${med(calib.dark)}`;
+      console.log('[shadow] calibration', calibInfo);
       status = auto ? 're-aligned' : 'calibrated';
       checklist.wall('ok', auto ? 're-aligned after the projector moved' : 'projector found — 4 squares seen', performance.now());
       hold.reset();
@@ -198,7 +205,9 @@ async function main() {
       const dark = projectedDarkInCamera(frame);
       darkPx = countOnes(dark);
       mask = shadowMask(frame, buildExpected(calib.whiteRef, dark));
+      const rawPx = countOnes(mask);
       if (lit) mask = keepInside(mask, lit); // shadows only count on the projected picture
+      shadowInfo = `shadow px: ${rawPx} seen → ${countOnes(mask)} on wall · ${findBlobs(mask).length} shape(s)`;
       // self-healing: if our creatures stop showing up where we project them, the projector moved
       const own = creatures.length ? projectedDarkInCamera(frame, false) : null;
       const steady = creatures.length ? erode(projectedDarkInCamera(frame, false, true), 2) : null;
@@ -243,7 +252,7 @@ async function main() {
     clearWhite(stage);
     for (const c of creatures) c.draw(stage.ctx);
     if (debug) {
-      const lines = [status, scene ? `shadow from ${scene.entry ?? 'nowhere'} → open ${scene.openSide}` : 'no shadow', `${creatures.length} creature(s)`, `last seen: ${lastRec}`, `ignoring ${darkPx} px`, scene ? `shape: ${whyIgnored ?? 'usable ✓'}` : ''];
+      const lines = [status, scene ? `shadow from ${scene.entry ?? 'nowhere'} → open ${scene.openSide}` : 'no shadow', `${creatures.length} creature(s)`, `last seen: ${lastRec}`, `ignoring ${darkPx} px`, calibInfo, shadowInfo, scene ? `shape: ${whyIgnored ?? 'usable ✓'}` : ''];
       if (recorder.recording) lines.push('● REC');
       drawDebug(stage.ctx, { frame, mask, fps, lines, puppetBox: scene?.puppetBox ?? null });
     }
