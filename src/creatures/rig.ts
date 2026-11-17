@@ -20,6 +20,8 @@ export type CreatureDef = {
   flips: boolean;
   /** Extra offset in rig units (hops, bobs) at time t (ms). */
   bob?: (t: number) => Pt;
+  /** Forward-speed multiplier over time (a rabbit only travels while in the air). Default 1. */
+  pace?: (t: number) => number;
   draw: (ctx: CanvasRenderingContext2D, t: number) => void;
 };
 
@@ -61,7 +63,7 @@ export class RiggedCreature implements Creature {
 
   update(dtMs: number): void {
     this.t += dtMs;
-    if (this.t > this.def.introMs) this.pos = Math.min(this.pathLen, this.pos + dtMs * this.speed);
+    if (this.t > this.def.introMs) this.pos = Math.min(this.pathLen, this.pos + dtMs * this.speed * (this.def.pace?.(this.t - this.def.introMs) ?? 1));
     if (this.flee) {
       this.shove = { x: this.shove.x + this.flee.dir.x * FLEE_SPEED * dtMs, y: this.shove.y + this.flee.dir.y * FLEE_SPEED * dtMs };
       const max = MAX_SHOVE * this.scale * Math.max(this.def.headBox.w, this.def.headBox.h);
@@ -105,6 +107,10 @@ export class RiggedCreature implements Creature {
 
   headBoxWorld(): Box {
     return this.toWorld(this.def.headBox);
+  }
+
+  extentWorld(): Box {
+    return this.toWorld(this.def.extent);
   }
 
   darkMask(w: number, h: number): Mask {
@@ -158,4 +164,44 @@ export function around(ctx: CanvasRenderingContext2D, px: number, py: number, an
   ctx.translate(-px, -py);
   fn();
   ctx.restore();
+}
+
+/** A closed smooth outline through points (Catmull-Rom), filled. */
+export function blob(ctx: CanvasRenderingContext2D, pts: number[][]): void {
+  const n = pts.length;
+  ctx.beginPath();
+  ctx.moveTo(pts[0][0], pts[0][1]);
+  for (let i = 0; i < n; i++) {
+    const p0 = pts[(i - 1 + n) % n], p1 = pts[i], p2 = pts[(i + 1) % n], p3 = pts[(i + 2) % n];
+    ctx.bezierCurveTo(p1[0] + (p2[0] - p0[0]) / 6, p1[1] + (p2[1] - p0[1]) / 6, p2[0] - (p3[0] - p1[0]) / 6, p2[1] - (p3[1] - p1[1]) / 6, p2[0], p2[1]);
+  }
+  ctx.closePath();
+  ctx.fill();
+}
+
+/** A tapered segment from a to b (width wa -> wb) with round ends (no self-overlap, so no holes). */
+export function taper(ctx: CanvasRenderingContext2D, ax: number, ay: number, bx: number, by: number, wa: number, wb: number): void {
+  const dx = bx - ax, dy = by - ay, len = Math.hypot(dx, dy) || 1, nx = -dy / len, ny = dx / len;
+  ctx.beginPath();
+  ctx.moveTo(ax + (nx * wa) / 2, ay + (ny * wa) / 2);
+  ctx.lineTo(bx + (nx * wb) / 2, by + (ny * wb) / 2);
+  ctx.lineTo(bx - (nx * wb) / 2, by - (ny * wb) / 2);
+  ctx.lineTo(ax - (nx * wa) / 2, ay - (ny * wa) / 2);
+  ctx.closePath();
+  ctx.fill();
+  ctx.beginPath(); ctx.arc(ax, ay, wa / 2, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(bx, by, wb / 2, 0, Math.PI * 2); ctx.fill();
+}
+
+/**
+ * A two-segment leg hanging from a hip/shoulder: upper segment at angle a1 (radians from straight down,
+ * positive = swung forward), lower segment bent by a2 relative to it. Returns the foot position.
+ */
+export function leg(ctx: CanvasRenderingContext2D, x: number, y: number, a1: number, l1: number, a2: number, l2: number, w1: number, w2: number): [number, number] {
+  const kx = x + Math.sin(a1) * l1, ky = y + Math.cos(a1) * l1;
+  const b = a1 + a2;
+  const fx = kx + Math.sin(b) * l2, fy = ky + Math.cos(b) * l2;
+  taper(ctx, x, y, kx, ky, w1, (w1 + w2) / 2);
+  taper(ctx, kx, ky, fx, fy, (w1 + w2) / 2, w2);
+  return [fx, fy];
 }

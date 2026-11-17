@@ -1,6 +1,8 @@
 import type { Box, CreatureKind, Mask, Pt, Recognition } from '../types';
 import { createCreature } from './index';
 import { planPath, pointAlong } from './path';
+import { centroidOf, morphOutline, outlineOf, type Outline } from './morph';
+import { setBlur } from './style';
 import type { RiggedCreature } from './rig';
 import { applyShadowStyle } from './style';
 import { DIRS, type Creature, type Spawn } from './types';
@@ -10,7 +12,8 @@ export const WAIT_MS = 6500; // a bit longer than the recognition timeout
 const DRIFT_SPEED = 0.15; // px per ms: an unrecognised shape wanders off with its own outline
 const FADE_PX = 120; // fades only over the last stretch of its route
 const GAP = 8;
-const MORPH_MS = 500;
+const MORPH_MS = 750; // the shadow's outline melts into the animal's
+const HANDOFF = 0.82; // after this much of the morph, the real drawing fades in
 
 type Phase = 'slide' | 'wait' | 'drift' | 'morph' | 'creature' | 'gone';
 
@@ -30,6 +33,8 @@ export class PeelOff implements Creature {
   protected readonly slideTo: Pt;
 
   private creature: RiggedCreature | null = null;
+  private morphFrom: Outline | null = null;
+  private morphTo: Outline | null = null;
   private morphStart = 0;
 
   /** `snapBox`: projector box of the image sent for recognition (anchor coords are relative to it). */
@@ -75,8 +80,15 @@ export class PeelOff implements Creature {
     if (this.phase === 'morph' || this.phase === 'creature') {
       this.creature!.update(dtMs);
       const k = Math.min(1, (this.t - this.morphStart) / MORPH_MS);
-      this.alpha = 1 - k;
-      this.creature!.alpha = k;
+      if (this.morphTo) {
+        // outline morph: the copied shadow itself is replaced by the morphing outline
+        const h = Math.max(0, (k - HANDOFF) / (1 - HANDOFF));
+        this.alpha = 0;
+        this.creature!.alpha = h;
+      } else {
+        this.alpha = 1 - k;
+        this.creature!.alpha = k;
+      }
       if (k >= 1) this.phase = 'creature';
     }
   }
@@ -95,6 +107,31 @@ export class PeelOff implements Creature {
     this.kind = kind;
     this.phase = 'morph';
     this.morphStart = this.t;
+    this.prepareOutlineMorph();
+  }
+
+  /** Outlines of the copied shadow (now) and of the animal's first pose, for the melting morph. */
+  private prepareOutlineMorph() {
+    if (typeof OffscreenCanvas === 'undefined' || !this.creature) return;
+    const N = 240;
+    const { mask, box } = this.shape;
+    const c0 = centroidOf(mask);
+    this.morphFrom = { c: { x: box.x + this.offset.x + c0.x, y: box.y + this.offset.y + c0.y }, r: outlineOf(mask, c0, N) };
+    const e = this.creature.extentWorld(), pad = 8;
+    const w = Math.ceil(e.w + 2 * pad), h = Math.ceil(e.h + 2 * pad);
+    const oc = new OffscreenCanvas(w, h), octx = oc.getContext('2d', { willReadFrequently: true })! as unknown as CanvasRenderingContext2D;
+    octx.translate(pad - e.x, pad - e.y);
+    const a = this.creature.alpha;
+    this.creature.alpha = 1;
+    setBlur(false);
+    this.creature.draw(octx);
+    setBlur(true);
+    this.creature.alpha = a;
+    const px = octx.getImageData(0, 0, w, h).data;
+    const m: Mask = { width: w, height: h, data: new Uint8Array(w * h) };
+    for (let i = 0; i < m.data.length; i++) m.data[i] = px[i * 4 + 3] > 128 ? 1 : 0;
+    const c1 = centroidOf(m);
+    this.morphTo = { c: { x: e.x - pad + c1.x, y: e.y - pad + c1.y }, r: outlineOf(m, c1, N) };
   }
 
   private startDrift() {
@@ -135,6 +172,18 @@ export class PeelOff implements Creature {
 
   draw(ctx: CanvasRenderingContext2D): void {
     if (this.phase === 'gone') return;
+    if (this.phase === 'morph' && this.morphFrom && this.morphTo) {
+      const k = Math.min(1, (this.t - this.morphStart) / MORPH_MS);
+      const e = k * k * (3 - 2 * k);
+      const pts = morphOutline(this.morphFrom, this.morphTo, e);
+      ctx.save();
+      applyShadowStyle(ctx, k < HANDOFF ? 1 : 1 - (k - HANDOFF) / (1 - HANDOFF));
+      ctx.beginPath();
+      pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
     this.creature?.draw(ctx);
     if (this.alpha <= 0) return;
     if (!this.sprite) this.sprite = maskSprite(this.shape.mask);

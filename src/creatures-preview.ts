@@ -7,7 +7,32 @@ const canvas = document.getElementById('c') as HTMLCanvasElement;
 const ctx = canvas.getContext('2d')!;
 const labels = document.getElementById('labels')!;
 const kinds = Object.keys(DEFS) as (keyof typeof DEFS)[];
-const still = new URLSearchParams(location.search).get('still');
+const params = new URLSearchParams(location.search);
+const still = params.get('still');
+const strip = params.get('strip'); // ?strip=dog&from=900&step=58 : frames of one stride side by side
+if (strip) {
+  const def = DEFS[strip as keyof typeof DEFS];
+  const from = Number(params.get('from') ?? 900), step = Number(params.get('step') ?? 60), n = Number(params.get('n') ?? 8);
+  const W = innerWidth * devicePixelRatio, H = innerHeight * devicePixelRatio;
+  canvas.width = W; canvas.height = H;
+  ctx.fillStyle = '#f4f1ea'; ctx.fillRect(0, 0, W, H);
+  const cell = W / n, sc = cell / 190;
+  for (let i = 0; i < n; i++) {
+    const t = from + i * step;
+    const bob = def.bob ? def.bob(t) : { x: 0, y: 0 };
+    ctx.save();
+    ctx.translate(cell * i + cell * 0.5, H * 0.55);
+    ctx.scale(sc, sc);
+    ctx.translate(bob.x, bob.y);
+    ctx.fillStyle = '#000'; ctx.strokeStyle = '#000';
+    ctx.filter = 'blur(1px)';
+    def.draw(ctx, t);
+    ctx.restore();
+    ctx.fillStyle = '#8a8478'; ctx.font = `${14 * devicePixelRatio}px system-ui`;
+    ctx.fillText(`${t} ms`, cell * i + 10, H - 12);
+  }
+  throw new Error('strip mode: static');
+}
 
 function size() {
   canvas.width = innerWidth * devicePixelRatio;
