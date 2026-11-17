@@ -21,9 +21,11 @@ across the wall.
 
 ```bash
 npm install
-npm run dev        # the page, http://localhost:5173
-npm run server     # recognition (needs an Anthropic API key, see below)
+export ANTHROPIC_API_KEY=<your key>   # in the same terminal
+npm start          # page (http://localhost:5173) + recognition server together
 ```
+
+(`npm run dev` and `npm run server` still start them separately.)
 
 Open http://localhost:5173 in **Chrome**, allow the camera, press **F** for
 fullscreen on the projector.

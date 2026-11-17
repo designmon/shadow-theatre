@@ -33,3 +33,10 @@ describe('health: key not set in the server terminal', () => {
     expect(r.claude).toBe('no-key');
   });
 });
+
+describe('health: SDK refuses to send without credentials', () => {
+  it('says no-key when the key is missing and the SDK errors before any request', async () => {
+    const r = await handleHealth({ models: { retrieve: async () => { throw new Error('Could not resolve authentication method.'); } } }, { keySet: false });
+    expect(r.claude).toBe('no-key');
+  });
+});

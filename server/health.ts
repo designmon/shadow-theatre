@@ -11,6 +11,7 @@ export async function handleHealth(client: HealthClient, env: { keySet: boolean 
     await client.models.retrieve('claude-opus-5-5');
     return { ok: true, claude: 'ok', ms: Date.now() - started };
   } catch (err) {
+    if (!env.keySet && !(err as { status?: number }).status) return { ok: true, claude: 'no-key' }; // SDK had no credentials to send
     const status = (err as { status?: number }).status;
     if (status === 401 || status === 403) return { ok: true, claude: env.keySet ? 'bad-key' : 'no-key' };
     return { ok: true, claude: 'error', message: err instanceof Error ? err.message : String(err) };
