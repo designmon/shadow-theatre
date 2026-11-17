@@ -26,18 +26,21 @@ describe('PeelOff', () => {
 
   it('unresolved peel finishes as unknown', () => {
     const p = new PeelOff(shape(), spawn);
-    run(p, 8600); // waits WAIT_MS (6.5 s) for recognition, then drifts away for 2 s
+    run(p, 6600); // waits WAIT_MS (6.5 s) for recognition, then travels off with its own shape
     expect(p.kind).toBe('unknown');
+    expect(p.done).toBe(false);
+    run(p, 30000);
     expect(p.done).toBe(true);
     expect(count(p.darkMask(1920, 1080))).toBe(0);
   });
 
-  it('resolve(unknown) drifts away early', () => {
+  it('resolve(unknown) sets off right away (no waiting for the timeout)', () => {
     const p = new PeelOff(shape(), spawn);
     run(p, 600);
+    const before = bbox(p.darkMask(1920, 1080));
     p.resolve({ kind: 'unknown', confidence: 0, facing: 'right', anchor: { x: 0.5, y: 0.5 } });
-    run(p, 2100);
-    expect(p.done).toBe(true);
+    run(p, 500);
+    expect(bbox(p.darkMask(1920, 1080)).x).toBeGreaterThan(before.x);
   });
 });
 
@@ -120,5 +123,21 @@ describe('review I7: latency budget', () => {
     const p = new PeelOff(shape(), spawn);
     run(p, 400);
     expect(p.steadyMs).toBeGreaterThanOrEqual(380);
+  });
+});
+
+describe('unrecognised shapes travel with their own shape', () => {
+  it('stays fully visible while travelling, then leaves', () => {
+    const p = new PeelOff(shape(), spawn);
+    run(p, 600);
+    p.resolve({ kind: 'unknown', confidence: 0, facing: 'right', anchor: { x: 0.5, y: 0.5 } });
+    run(p, 2000);
+    expect(p.done).toBe(false);
+    expect(count(p.darkMask(1920, 1080))).toBeGreaterThan(5000); // still the full shape, not faded
+    const before = bbox(p.darkMask(1920, 1080));
+    run(p, 1000);
+    expect(bbox(p.darkMask(1920, 1080)).x).not.toBe(before.x); // moving
+    run(p, 20000);
+    expect(p.done).toBe(true);
   });
 });

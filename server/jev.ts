@@ -17,6 +17,7 @@ const KINDS = {
   rabbit: 'A rabbit: two long upright ears (two fingers) above a rounded head.',
   butterfly: 'A butterfly: two hands joined at the hooked thumbs, fingers spread as two pairs of wings.',
   swan: 'A swan: the forearm held up as a long neck, the hand bent at the wrist as head and beak.',
+  heart: 'A heart made with two hands: curled fingers form the two round lobes on top, the thumbs meet in the point at the bottom.',
   none: 'Anything else, or not clearly one of these.',
 };
 
@@ -34,7 +35,7 @@ export async function recognizeWithJev(png: Buffer, apiKey: string, fetchFn: typ
         ],
         questions: {
           kind: { type: 'choice', instructions: 'Which shadow-puppet animal is this hand shadow making? Judge the overall gesture; hand shadows are rough.', criteria: KINDS },
-          head: { type: 'box', instructions: "the animal's head in the hand-shadow silhouette image (for a butterfly: the middle of its body)" },
+          head: { type: 'box', instructions: "the animal's head in the hand-shadow silhouette image (for a butterfly or a heart: its middle)" },
           facing: {
             type: 'choice',
             instructions: "Which way does the animal's head (snout, beak) point in the image?",

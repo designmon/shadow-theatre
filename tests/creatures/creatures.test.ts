@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createCreature } from '../../src/creatures';
 import type { Spawn } from '../../src/creatures/types';
 
-const kinds = ['dog', 'rabbit', 'butterfly', 'swan'] as const;
+const kinds = ['dog', 'rabbit', 'butterfly', 'swan', 'heart'] as const;
 const spawn: Spawn = {
   anchorBox: { x: 700, y: 400, w: 160, h: 120 },
   facing: 'right', openSide: 'right', wall: { w: 1920, h: 1080 }, avoid: { x: 0, y: 300, w: 500, h: 780 },

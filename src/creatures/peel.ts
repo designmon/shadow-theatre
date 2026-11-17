@@ -7,8 +7,8 @@ import { DIRS, type Creature, type Spawn } from './types';
 
 const SLIDE_MS = 600;
 export const WAIT_MS = 6500; // a bit longer than the recognition timeout
-const DRIFT_MS = 2000;
-const DRIFT_SPEED = 0.2; // px per ms
+const DRIFT_SPEED = 0.15; // px per ms: an unrecognised shape wanders off with its own outline
+const FADE_PX = 120; // fades only over the last stretch of its route
 const GAP = 8;
 const MORPH_MS = 500;
 
@@ -104,19 +104,19 @@ export class PeelOff implements Creature {
     const at = { ...b, x: b.x + this.offset.x, y: b.y + this.offset.y };
     this.path = planPath({ ...this.spawn, anchorBox: at });
     this.pathPos = 0;
-    this.driftStart = this.t;
+    this.pathLen = this.path.slice(1).reduce((s, q, i) => s + Math.hypot(q.x - this.path[i].x, q.y - this.path[i].y), 0);
   }
-  private driftStart = 0;
+  private pathLen = 0;
 
   private stepDrift(dtMs: number) {
-    const k = (this.t - this.driftStart) / DRIFT_MS;
-    this.alpha = Math.max(0, 1 - k);
-    this.pathPos += dtMs * DRIFT_SPEED;
+    this.pathPos = Math.min(this.pathLen, this.pathPos + dtMs * DRIFT_SPEED);
+    this.alpha = Math.min(1, (this.pathLen - this.pathPos) / FADE_PX);
     const p = pointAlong(this.path, this.pathPos);
     const c0 = this.path[0];
     const base = this.offsetAtDriftStart ?? (this.offsetAtDriftStart = { ...this.offset });
-    this.offset = { x: base.x + p.x - c0.x, y: base.y + p.y - c0.y };
-    if (k >= 1) this.phase = 'gone';
+    const bob = Math.sin(this.t / 260) * 6; // a gentle float so it feels alive
+    this.offset = { x: base.x + p.x - c0.x, y: base.y + p.y - c0.y + bob };
+    if (this.pathPos >= this.pathLen) this.phase = 'gone';
   }
   private offsetAtDriftStart: Pt | null = null;
 

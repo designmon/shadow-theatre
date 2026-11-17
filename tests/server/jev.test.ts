@@ -5,7 +5,7 @@ const png = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
 const reply = (status: number, body: unknown) => async () => new Response(JSON.stringify(body), { status });
 const answers = (kind: string, p: number) => ({
   answers: {
-    kind: { type: 'choice', choice: kind, confidence: 0.9, probabilities: { dog: 0, rabbit: 0, butterfly: 0, swan: 0, none: 0, [kind]: p } },
+    kind: { type: 'choice', choice: kind, confidence: 0.9, probabilities: { dog: 0, rabbit: 0, butterfly: 0, swan: 0, heart: 0, none: 0, [kind]: p } },
     head: { type: 'box', box: { top: 0.1, bottom: 0.3, left: 0.6, right: 0.9 }, confidence: 0.8 },
     facing: { type: 'choice', choice: 'right', confidence: 0.9, probabilities: { right: 0.9, left: 0.1, up: 0, down: 0 } },
   },
@@ -21,7 +21,7 @@ describe('recognizeWithJev', () => {
     const body = JSON.parse(calls[0].init.body as string);
     expect(body.model).toBe('typesafe/jev-1.14');
     expect(body.state[1]).toEqual({ type: 'image_url', image_url: { url: `data:image/png;base64,${png.toString('base64')}` } });
-    expect(Object.keys(body.questions.kind.criteria)).toEqual(['dog', 'rabbit', 'butterfly', 'swan', 'none']);
+    expect(Object.keys(body.questions.kind.criteria)).toEqual(['dog', 'rabbit', 'butterfly', 'swan', 'heart', 'none']);
     expect(body.questions.head.type).toBe('box');
     expect(body.questions.facing.type).toBe('choice');
   });
@@ -48,5 +48,11 @@ describe('jevHealth', () => {
   });
   it('bad-key on 401', async () => {
     expect(await jevHealth('k', reply(401, {}) as typeof fetch)).toMatchObject({ claude: 'bad-key', provider: 'Jev' });
+  });
+});
+
+describe('heart', () => {
+  it('recognises the two-hand heart', async () => {
+    expect((await recognizeWithJev(png, 'k', reply(200, answers('heart', 0.8)) as typeof fetch)).kind).toBe('heart');
   });
 });

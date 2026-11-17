@@ -4,7 +4,7 @@ import type { Recognition } from '../src/types';
 
 const Side = z.enum(['left', 'right', 'up', 'down']);
 export const RecognitionSchema = z.object({
-  kind: z.enum(['dog', 'rabbit', 'butterfly', 'swan', 'unknown']),
+  kind: z.enum(['dog', 'rabbit', 'butterfly', 'swan', 'heart', 'unknown']),
   confidence: z.number().describe('0 to 1'),
   facing: Side.describe('direction the head (or, for the butterfly, the top of the wings) points in the image'),
   anchor: z.object({ x: z.number(), y: z.number() }).describe("the creature's head in the image, as fractions 0..1 of width and height (butterfly: body center)"),
@@ -22,6 +22,7 @@ Classify it as exactly one of:
 - rabbit: two upright fingers as long ears above a rounded head.
 - butterfly: two hands joined at the hooked thumbs, fingers spread as two pairs of wings.
 - swan: the forearm held upright as a long neck, the hand bent at the wrist as head and beak.
+- heart: two hands forming a heart, curled fingers as the two round lobes on top, thumbs meeting in the point at the bottom.
 - unknown: anything else, or if you are not reasonably sure.
 
 Hand shadows are rough; judge the overall gesture, not fine detail. Give confidence from 0 to 1.`;
