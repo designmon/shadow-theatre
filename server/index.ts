@@ -31,6 +31,6 @@ createServer(async (req, res) => {
   const rec = OPENROUTER_KEY ? await recognizeWithJev(png, OPENROUTER_KEY) : await handleRecognize(png, anthropic as unknown as RecognizeClient);
   const ms = Date.now() - started;
   const file = saveCapture('captures', png, rec, ms);
-  console.log(`[recognize] ${rec.kind} (${rec.confidence.toFixed(2)}) in ${ms} ms  -> captures/${file}`);
+  console.log(`[recognize] ${rec.kind} (${rec.confidence.toFixed(2)}) in ${ms} ms${rec.note ? `  — ${rec.note}` : ''}  -> captures/${file}`);
   json(rec);
 }).listen(PORT, () => console.log(`recognition server on http://localhost:${PORT}`));

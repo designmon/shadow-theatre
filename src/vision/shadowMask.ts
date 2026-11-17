@@ -113,3 +113,37 @@ export function keepInside(m: Mask, region: Mask): Mask {
   for (let i = 0; i < data.length; i++) data[i] = m.data[i] & region.data[i];
   return { width: m.width, height: m.height, data };
 }
+
+/**
+ * Smooth a blocky outline (a small camera mask enlarged onto the big wall):
+ * blur with a box of radius r (two passes ≈ soft round kernel), then cut at half.
+ */
+export function smoothMask(m: Mask, r: number): Mask {
+  const { width: W, height: H } = m;
+  if (r < 1) return m;
+  let a: Float32Array = Float32Array.from(m.data);
+  const blur = (src: Float32Array) => {
+    const tmp = new Float32Array(W * H), out = new Float32Array(W * H), k = 2 * r + 1;
+    for (let y = 0; y < H; y++) {
+      let s = 0;
+      for (let x = -r; x <= r; x++) s += src[y * W + Math.min(W - 1, Math.max(0, x))];
+      for (let x = 0; x < W; x++) {
+        tmp[y * W + x] = s / k;
+        s += src[y * W + Math.min(W - 1, x + r + 1)] - src[y * W + Math.max(0, x - r)];
+      }
+    }
+    for (let x = 0; x < W; x++) {
+      let s = 0;
+      for (let y = -r; y <= r; y++) s += tmp[Math.min(H - 1, Math.max(0, y)) * W + x];
+      for (let y = 0; y < H; y++) {
+        out[y * W + x] = s / k;
+        s += tmp[Math.min(H - 1, y + r + 1) * W + x] - tmp[Math.max(0, y - r) * W + x];
+      }
+    }
+    return out;
+  };
+  a = blur(blur(a));
+  const data = new Uint8Array(W * H);
+  for (let i = 0; i < data.length; i++) data[i] = a[i] >= 0.5 ? 1 : 0;
+  return { width: W, height: H, data };
+}

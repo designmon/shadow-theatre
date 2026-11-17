@@ -56,3 +56,28 @@ describe('heart', () => {
     expect((await recognizeWithJev(png, 'k', reply(200, answers('heart', 0.8)) as typeof fetch)).kind).toBe('heart');
   });
 });
+
+describe('Jev answers in every documented shape (real-room report: always "unknown (0.00)")', () => {
+  it('a choice without probabilities is trusted via its confidence', async () => {
+    const body = { answers: { kind: { type: 'choice', choice: 'dog', confidence: 0.71 }, head: { type: 'box', box: { top: 0, bottom: 0.4, left: 0.5, right: 1 } }, facing: { type: 'choice', choice: 'right' } } };
+    const r = await recognizeWithJev(png, 'k', reply(200, body) as typeof fetch);
+    expect(r.kind).toBe('dog');
+    expect(r.confidence).toBeCloseTo(0.71);
+  });
+  it('a refusal becomes unknown and says so', async () => {
+    const body = { answers: { kind: { type: 'refusal' }, head: { type: 'refusal' }, facing: { type: 'refusal' } } };
+    const r = await recognizeWithJev(png, 'k', reply(200, body) as typeof fetch);
+    expect(r.kind).toBe('unknown');
+    expect(r.note).toMatch(/declined/i);
+  });
+  it('an HTTP error says what OpenRouter answered', async () => {
+    const r = await recognizeWithJev(png, 'k', reply(400, { error: { code: 400, message: 'Box questions need typesafe/jev-1.14' } }) as typeof fetch);
+    expect(r.kind).toBe('unknown');
+    expect(r.note).toMatch(/400/);
+    expect(r.note).toMatch(/Box questions need/);
+  });
+  it('a low-probability guess says what it guessed', async () => {
+    const r = await recognizeWithJev(png, 'k', reply(200, answers('swan', 0.3)) as typeof fetch);
+    expect(r.note).toMatch(/swan/);
+  });
+});

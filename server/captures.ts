@@ -8,6 +8,6 @@ export function saveCapture(dir: string, png: Buffer, rec: Recognition, ms: numb
   const stamp = at.toISOString().replace(/[:.]/g, '-');
   const file = `${stamp}-${rec.kind}-${rec.confidence.toFixed(2)}.png`;
   writeFileSync(join(dir, file), png);
-  appendFileSync(join(dir, 'log.txt'), `${file}\t${rec.kind}\t${rec.confidence.toFixed(2)}\t${rec.facing}\t${ms}ms\n`);
+  appendFileSync(join(dir, 'log.txt'), `${file}\t${rec.kind}\t${rec.confidence.toFixed(2)}\t${rec.facing}\t${ms}ms${rec.note ? `\t${rec.note}` : ''}\n`);
   return file;
 }

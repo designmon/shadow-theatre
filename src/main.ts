@@ -16,7 +16,7 @@ import { HoldDetector } from './vision/hold';
 import { projectBox, projectMask } from './vision/project';
 import { analyzeScene, isUsablePuppet, sceneLit, usableReason, type Scene } from './vision/scene';
 import { setBlur } from './creatures/style';
-import { buildExpected, dilate, erode, keepInside, litMask, shadowMask } from './vision/shadowMask';
+import { buildExpected, dilate, erode, keepInside, litMask, shadowMask, smoothMask } from './vision/shadowMask';
 import { installSimCamera } from './sim';
 import { recognize } from './recognize/client';
 import { maskToPng } from './vision/snapshot';
@@ -97,7 +97,10 @@ function spawnPeel(scene: Scene): PeelOff {
   const snap = { x: Math.max(0, pb.x - SNAP_PAD), y: Math.max(0, pb.y - SNAP_PAD), w: 0, h: 0 };
   snap.w = Math.min(scene.puppet.width, pb.x + pb.w + SNAP_PAD) - snap.x;
   snap.h = Math.min(scene.puppet.height, pb.y + pb.h + SNAP_PAD) - snap.y;
-  const shape = projectMask(scene.puppet, scene.puppetBox, c.camToProj, c.projToCam);
+  const raw = projectMask(scene.puppet, scene.puppetBox, c.camToProj, c.projToCam);
+  // each camera pixel became a block of ~scale x scale on the wall: smooth those steps away
+  const scale = raw.box.w / Math.max(1, scene.puppetBox.w);
+  const shape = { box: raw.box, mask: smoothMask(raw.mask, Math.round(scale * 0.6)) };
   const { w, h } = stage.size();
   const peel = new PeelOff(shape, {
     anchorBox: shape.box,
@@ -224,7 +227,7 @@ async function main() {
           showLastCapture(png, 'asking Claude…');
           return recognize(png).then((rec) => {
             lastRec = `${rec.kind} (${rec.confidence.toFixed(2)})`;
-            showLastCapture(png, `→ ${lastRec}`);
+            showLastCapture(png, `→ ${lastRec}${rec.note ? ` — ${rec.note}` : ''}`);
             console.log('[shadow] sent shape, Claude said', rec);
             peel.resolve(rec);
           });

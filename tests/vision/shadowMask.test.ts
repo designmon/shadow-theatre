@@ -117,3 +117,31 @@ describe('room not fully dark (real-room report: white 180 / black 136)', () => 
     expect(bbox(m)).toEqual({ x: 100, y: 80, w: 60, h: 50 });
   });
 });
+
+import { smoothMask } from '../../src/vision/shadowMask';
+describe('smoothMask (no blocky copies on the wall)', () => {
+  // a diagonal edge enlarged 8x from a small camera picture: big stair steps
+  const stairs = () => {
+    const m = mask(80, 80);
+    for (let y = 0; y < 80; y++) for (let x = 0; x < 80; x++) if (Math.floor(x / 8) <= Math.floor(y / 8)) m.data[y * 80 + x] = 1;
+    return m;
+  };
+  const steps = (m: ReturnType<typeof mask>) => {
+    // how many rows the edge stays on the same column = step height; smooth edges move every row or two
+    let longest = 0, run = 0, prev = -1;
+    for (let y = 10; y < 70; y++) {
+      let edge = 0;
+      for (let x = 0; x < 80; x++) if (m.data[y * 80 + x]) edge = x;
+      run = edge === prev ? run + 1 : 1; prev = edge; longest = Math.max(longest, run);
+    }
+    return longest;
+  };
+  it('turns stair steps into a smooth edge', () => {
+    expect(steps(stairs())).toBeGreaterThanOrEqual(8);
+    expect(steps(smoothMask(stairs(), 5))).toBeLessThanOrEqual(3);
+  });
+  it('keeps the shape about the same size', () => {
+    const before = count(stairs()), after = count(smoothMask(stairs(), 5));
+    expect(Math.abs(after - before) / before).toBeLessThan(0.08);
+  });
+});

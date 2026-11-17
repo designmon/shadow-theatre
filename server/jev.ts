@@ -45,26 +45,33 @@ export async function recognizeWithJev(png: Buffer, apiKey: string, fetchFn: typ
       }),
     });
     if (!res.ok) {
-      console.error('[jev] HTTP', res.status, (await res.text()).slice(0, 300));
-      return UNKNOWN;
+      const text = (await res.text()).slice(0, 400);
+      let msg = text;
+      try { msg = JSON.parse(text).error?.message ?? text; } catch { /* not JSON */ }
+      console.error('[jev] HTTP', res.status, msg);
+      return { ...UNKNOWN, note: `Jev error ${res.status}: ${msg}`.slice(0, 160) };
     }
-    const { answers } = (await res.json()) as {
-      answers: {
-        kind: { choice: string; probabilities: Record<string, number> };
-        head?: { box: { top: number; bottom: number; left: number; right: number } };
-        facing?: { choice: Side };
-      };
+    const raw = await res.json();
+    console.log('[jev] answers', JSON.stringify(raw.answers));
+    const answers = raw.answers as {
+      kind: { type: string; choice?: string; probabilities?: Record<string, number>; confidence?: number };
+      head?: { type: string; box?: { top: number; bottom: number; left: number; right: number } };
+      facing?: { type: string; choice?: Side };
     };
+    if (answers.kind?.type === 'refusal' || !answers.kind?.choice) return { ...UNKNOWN, note: 'Jev declined to answer' };
     const kind = answers.kind.choice;
-    const p = answers.kind.probabilities?.[kind] ?? 0;
+    // probabilities are optional in the answer; fall back to the choice's confidence
+    const p = answers.kind.probabilities?.[kind] ?? answers.kind.confidence ?? 0;
     const box = answers.head?.box;
     const anchor = box ? { x: clamp01((box.left + box.right) / 2), y: clamp01((box.top + box.bottom) / 2) } : { x: 0.5, y: 0.5 };
     const facing = answers.facing?.choice ?? 'right';
-    if (kind === 'none' || !(kind in KINDS) || p < MIN_PROBABILITY) return { kind: 'unknown', confidence: p, facing, anchor };
+    if (kind === 'none' || !(kind in KINDS)) return { kind: 'unknown', confidence: p, facing, anchor, note: `Jev: none of the shapes (${p.toFixed(2)})` };
+    if (p < MIN_PROBABILITY) return { kind: 'unknown', confidence: p, facing, anchor, note: `Jev guessed ${kind}, too unsure (${p.toFixed(2)})` };
     return { kind: kind as Recognition['kind'], confidence: p, facing, anchor };
   } catch (err) {
-    console.error('[jev] failed:', err instanceof Error ? err.message : err);
-    return UNKNOWN;
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[jev] failed:', msg);
+    return { ...UNKNOWN, note: `Jev unreachable: ${msg}`.slice(0, 160) };
   }
 }
 
