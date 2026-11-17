@@ -160,7 +160,7 @@ async function main() {
       calibInfo = `wall ${Math.round((100 * countOnes(wall)) / n)}% of view · lit ${Math.round((100 * litBefore) / n)}% → ${Math.round((100 * countOnes(lit)) / n)}% · white ${med(calib.whiteRef)} / black ${med(calib.dark)}`;
       console.log('[shadow] calibration', calibInfo);
       status = auto ? 're-aligned' : 'calibrated';
-      checklist.wall('ok', auto ? 're-aligned after the projector moved' : 'projector found — 4 squares seen', performance.now());
+      checklist.wall('ok', auto ? 're-aligned after the projector moved' : calib.method === 'picture' ? 'projector found — from the bright picture' : 'projector found — 4 squares seen', performance.now());
       hold.reset();
     } catch (err) {
       status = auto ? 'projector moved? step out of the beam and press C' : String((err as Error).message ?? err);
@@ -257,7 +257,8 @@ async function main() {
     if (debug) {
       const lines = [status, scene ? `shadow from ${scene.entry ?? 'nowhere'} → open ${scene.openSide}` : 'no shadow', `${creatures.length} creature(s)`, `last seen: ${lastRec}`, `ignoring ${darkPx} px`, calibInfo, shadowInfo, scene ? `shape: ${whyIgnored ?? 'usable ✓'}` : ''];
       if (recorder.recording) lines.push('● REC');
-      drawDebug(stage.ctx, { frame, mask, fps, lines, puppetBox: scene?.puppetBox ?? null });
+      // before calibration it can't tell wall from room: don't paint the room red
+      drawDebug(stage.ctx, { frame, mask: calib ? mask : { width: frame.width, height: frame.height, data: new Uint8Array(frame.data.length) }, fps, lines, puppetBox: scene?.puppetBox ?? null });
     }
   };
   requestAnimationFrame(tick);
