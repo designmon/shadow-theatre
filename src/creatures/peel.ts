@@ -10,7 +10,6 @@ import { DIRS, type Creature, type Spawn } from './types';
 const SLIDE_MS = 600;
 export const WAIT_MS = 6500; // a bit longer than the recognition timeout
 const DRIFT_SPEED = 0.15; // px per ms: an unrecognised shape wanders off with its own outline
-const FADE_PX = 120; // fades only over the last stretch of its route
 const GAP = 8;
 const HOLD_MS = 350; // the copied hand shape stays a moment, so you see it's yours
 const MORPH_MS = 1200; // then its outline melts slowly into the animal's
@@ -59,6 +58,17 @@ export class PeelOff implements Creature {
     return 0;
   }
 
+  private retireAt: number | null = null;
+
+  retire(): void {
+    if (this.creature) this.creature.retire();
+    else if (this.retireAt === null) this.retireAt = this.t;
+  }
+
+  get retiring(): boolean {
+    return this.retireAt !== null || (this.creature?.retiring ?? false);
+  }
+
   /** Forward a nearby hand to the creature (once there is one). */
   avoid(box: Box): void {
     if (this.phase === 'creature') this.creature?.avoid(box);
@@ -77,6 +87,7 @@ export class PeelOff implements Creature {
     }
     if (this.phase === 'wait' && this.resolution && this.resolution.kind !== 'unknown') this.startCreature(this.resolution);
     else if (this.phase === 'wait' && (this.resolution || this.t >= WAIT_MS)) this.startDrift();
+    if (this.retireAt !== null && (this.phase === 'slide' || this.phase === 'wait')) this.startDrift();
     if (this.phase === 'drift') this.stepDrift(dtMs);
     if (this.phase === 'morph' || this.phase === 'creature') {
       const k = this.morphK();
@@ -145,21 +156,22 @@ export class PeelOff implements Creature {
     this.phase = 'drift';
     const b = this.shape.box;
     const at = { ...b, x: b.x + this.offset.x, y: b.y + this.offset.y };
-    this.path = planPath({ ...this.spawn, anchorBox: at });
+    this.path = planPath({ ...this.spawn, anchorBox: at }, undefined, { wander: 2, exit: false });
     this.pathPos = 0;
     this.pathLen = this.path.slice(1).reduce((s, q, i) => s + Math.hypot(q.x - this.path[i].x, q.y - this.path[i].y), 0);
   }
   private pathLen = 0;
 
   private stepDrift(dtMs: number) {
+    // an unrecognised shape wanders a little, then settles and floats there (it stays part of the picture)
     this.pathPos = Math.min(this.pathLen, this.pathPos + dtMs * DRIFT_SPEED);
-    this.alpha = Math.min(1, (this.pathLen - this.pathPos) / FADE_PX);
+    this.alpha = this.retireAt === null ? 1 : Math.max(0, 1 - (this.t - this.retireAt) / 1500);
     const p = pointAlong(this.path, this.pathPos);
     const c0 = this.path[0];
     const base = this.offsetAtDriftStart ?? (this.offsetAtDriftStart = { ...this.offset });
     const bob = Math.sin(this.t / 260) * 6; // a gentle float so it feels alive
     this.offset = { x: base.x + p.x - c0.x, y: base.y + p.y - c0.y + bob };
-    if (this.pathPos >= this.pathLen) this.phase = 'gone';
+    if (this.alpha <= 0) this.phase = 'gone';
   }
   private offsetAtDriftStart: Pt | null = null;
 

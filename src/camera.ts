@@ -34,15 +34,28 @@ export async function startCamera(deviceId?: string | null): Promise<{ video: HT
 
 let scratch: OffscreenCanvas | null = null;
 
-/** Downscaled grayscale (luminance) frame from the webcam. */
+/**
+ * Downscaled grayscale (luminance) frame from the webcam. Read at twice the size, then halved
+ * keeping the darkest pixel of each 2x2 block: thin finger shadows stay dark instead of being
+ * averaged into the white wall.
+ */
 export function grabGray(video: HTMLVideoElement, w = 320, h = 240): Gray {
-  if (!scratch || scratch.width !== w || scratch.height !== h) scratch = new OffscreenCanvas(w, h);
+  const W = w * 2, H = h * 2;
+  if (!scratch || scratch.width !== W || scratch.height !== H) scratch = new OffscreenCanvas(W, H);
   const ctx = scratch.getContext('2d', { willReadFrequently: true })!;
-  ctx.drawImage(video, 0, 0, w, h);
-  const rgba = ctx.getImageData(0, 0, w, h).data;
-  const data = new Uint8ClampedArray(w * h);
-  for (let i = 0, j = 0; j < data.length; i += 4, j++) {
-    data[j] = (rgba[i] * 77 + rgba[i + 1] * 150 + rgba[i + 2] * 29) >> 8;
+  ctx.drawImage(video, 0, 0, W, H);
+  const rgba = ctx.getImageData(0, 0, W, H).data;
+  const full = new Uint8ClampedArray(W * H);
+  for (let i = 0, j = 0; j < full.length; i += 4, j++) full[j] = (rgba[i] * 77 + rgba[i + 1] * 150 + rgba[i + 2] * 29) >> 8;
+  return minPool2(full, W, H);
+}
+
+/** Halve a picture, keeping the darkest pixel of each 2x2 block. */
+export function minPool2(src: Uint8ClampedArray, W: number, H: number): Gray {
+  const w = W >> 1, h = H >> 1, data = new Uint8ClampedArray(w * h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const i = 2 * y * W + 2 * x;
+    data[y * w + x] = Math.min(src[i], src[i + 1], src[i + W], src[i + W + 1]);
   }
   return { width: w, height: h, data };
 }

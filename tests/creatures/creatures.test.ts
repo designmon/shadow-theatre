@@ -27,10 +27,22 @@ describe.each(kinds)('%s', (kind) => {
     }
   });
 
-  it('eventually done', () => {
+  it('stays on the wall, exploring (never leaves by itself)', () => {
     const c = createCreature(kind, spawn);
-    let t = 0;
-    while (!c.done && t < 15000) { c.update(33); t += 33; }
+    for (let t = 0; t < 60000; t += 33) c.update(33);
+    expect(c.done).toBe(false);
+    const h = c.headBoxWorld();
+    expect(h.x + h.w / 2).toBeGreaterThan(-h.w);
+    expect(h.x + h.w / 2).toBeLessThan(1920 + h.w);
+    expect(h.y + h.h / 2).toBeGreaterThan(-h.h);
+    expect(h.y + h.h / 2).toBeLessThan(1080 + h.h);
+  });
+
+  it('retire() fades it out, then it is done', () => {
+    const c = createCreature(kind, spawn);
+    for (let t = 0; t < 3000; t += 33) c.update(33);
+    c.retire();
+    for (let t = 0; t < 2500; t += 33) c.update(33);
     expect(c.done).toBe(true);
   });
 
@@ -41,24 +53,6 @@ describe.each(kinds)('%s', (kind) => {
   });
 });
 
-describe('stage presence', () => {
-  it('a creature stays on the wall at least 3.5 s even near the edge', () => {
-    for (const kind of kinds) {
-      const c = createCreature(kind, { ...spawn, anchorBox: { x: 1300, y: 400, w: 100, h: 80 } });
-      let t = 0;
-      while (!c.done && t < 20000) { c.update(33); t += 33; }
-      expect(t).toBeGreaterThanOrEqual(3500);
-    }
-  });
-});
 
-describe('stays to be seen (real-room report: the rabbit was gone almost instantly)', () => {
-  it('a rabbit or dog stays on the wall for at least 6 s, whatever the hand size', () => {
-    for (const kind of ['rabbit', 'dog'] as const) {
-      const c = createCreature(kind, { ...spawn, anchorBox: { x: 900, y: 400, w: 300, h: 260 } });
-      let t = 0;
-      while (!c.done && t < 40000) { c.update(33); t += 33; }
-      expect(t).toBeGreaterThanOrEqual(6000);
-    }
-  });
-});
+
+

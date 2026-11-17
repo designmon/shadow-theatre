@@ -26,10 +26,12 @@ describe('PeelOff', () => {
 
   it('unresolved peel finishes as unknown', () => {
     const p = new PeelOff(shape(), spawn);
-    run(p, 6600); // waits WAIT_MS (6.5 s) for recognition, then travels off with its own shape
+    run(p, 6600); // waits WAIT_MS (6.5 s) for recognition, then wanders with its own shape
     expect(p.kind).toBe('unknown');
-    expect(p.done).toBe(false);
     run(p, 30000);
+    expect(p.done).toBe(false); // it stays, part of the picture
+    p.retire();
+    run(p, 1600);
     expect(p.done).toBe(true);
     expect(count(p.darkMask(1920, 1080))).toBe(0);
   });
@@ -67,11 +69,14 @@ describe('PeelOff resolving into a creature', () => {
     expect(intersects(b, anchorBox)).toBe(false);
   });
 
-  it('creature eventually leaves the wall', () => {
+  it('the creature stays on the wall until retired', () => {
     const p = new PeelOff(shape(), spawn);
     run(p, 600);
     p.resolve({ kind: 'rabbit', confidence: 0.9, facing: 'right', anchor: { x: 0.5, y: 0.3 } });
-    run(p, 15000);
+    run(p, 30000);
+    expect(p.done).toBe(false);
+    p.retire();
+    run(p, 2500);
     expect(p.done).toBe(true);
   });
 });
@@ -138,7 +143,7 @@ describe('unrecognised shapes travel with their own shape', () => {
     run(p, 1000);
     expect(bbox(p.darkMask(1920, 1080)).x).not.toBe(before.x); // moving
     run(p, 20000);
-    expect(p.done).toBe(true);
+    expect(p.done).toBe(false); // settles and stays
   });
 });
 

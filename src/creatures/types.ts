@@ -7,6 +7,9 @@ export interface Creature {
   update(dtMs: number): void;
   draw(ctx: CanvasRenderingContext2D): void;
   readonly done: boolean;
+  /** Fade out gently (the wall is getting full). */
+  retire(): void;
+  readonly retiring?: boolean;
   /** ms fully opaque so far (0 while fading). */
   readonly steadyMs?: number;
   /** Projector pixels this creature currently darkens (so the camera ignores them). */

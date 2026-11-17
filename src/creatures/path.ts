@@ -18,7 +18,7 @@ function inside(p: Pt, b: Box, pad: number) {
 
 /** A wandering route from the anchor, out through the open side, off the wall. */
 /** `wander`: number of random stops across the free wall before heading off (so it can be enjoyed). */
-export function planPath(spawn: Spawn, seed = Date.now(), opts: { wander?: number } = {}): Pt[] {
+export function planPath(spawn: Spawn, seed = Date.now(), opts: { wander?: number; exit?: boolean } = {}): Pt[] {
   const rand = rng(seed);
   const { anchorBox: a, wall, avoid } = spawn;
   const d = DIRS[spawn.openSide];
@@ -55,7 +55,7 @@ export function planPath(spawn: Spawn, seed = Date.now(), opts: { wander?: numbe
       pts.push(q);
       from = q;
     }
-    return [...pts, ...exitFrom(from, spawn, size, rand)];
+    return opts.exit === false ? pts : [...pts, ...exitFrom(from, spawn, size, rand)];
   }
   const n = 4;
   for (let i = 1; i <= n; i++) {

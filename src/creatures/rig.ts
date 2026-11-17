@@ -28,6 +28,7 @@ export type CreatureDef = {
 };
 
 const MIN_SPEED = 0.12; // px per ms
+const RETIRE_MS = 1500;
 const FLEE_MS = 800;
 const FLEE_SPEED = 0.35; // px per ms
 const SHY_GRACE_MS = 1000; // after the intro, before it starts minding hands
@@ -37,6 +38,7 @@ export class RiggedCreature implements Creature {
   readonly kind: CreatureKind;
   t = 0;
   alpha = 1;
+  private fade = 1;
   private path: Pt[];
   private pathLen: number;
   private pos = 0;
@@ -52,7 +54,9 @@ export class RiggedCreature implements Creature {
     this.kind = def.kind;
     const a = spawn.anchorBox;
     this.scale = Math.max(a.w, a.h) / Math.max(def.headBox.w, def.headBox.h);
-    this.path = planPath(spawn, seed, { wander: def.wander ?? 0 });
+    this.spawn = spawn;
+    this.seed = seed ?? Math.floor(Math.random() * 1e9);
+    this.path = planPath(spawn, this.seed, { wander: def.wander ?? 2, exit: false });
     this.pathLen = this.path.slice(1).reduce((s, p, i) => s + Math.hypot(p.x - this.path[i].x, p.y - this.path[i].y), 0);
     // head-sizes per second, but never faster than crossing the wall in ~7 s (big hands made it race off)
     this.speed = Math.max(MIN_SPEED, Math.min((def.speed * Math.max(a.w, a.h)) / 1000, spawn.wall.w / 7000));
@@ -60,13 +64,41 @@ export class RiggedCreature implements Creature {
     this.flip = def.flips && (Math.abs(dx) > 1 ? dx < 0 : spawn.facing === 'left');
   }
 
+  private spawn: Spawn;
+  private seed: number;
+  private pauseUntil = 0;
+  private retireAt: number | null = null;
+
   get done(): boolean {
-    return this.pos >= this.pathLen;
+    return this.retireAt !== null && this.t - this.retireAt >= RETIRE_MS;
   }
+
+  /** Fade out gently (the wall is getting full). */
+  retire(): void {
+    if (this.retireAt === null) this.retireAt = this.t;
+  }
+
+  get retiring(): boolean {
+    return this.retireAt !== null;
+  }
+
+  /** At the end of a route: rest a moment, then explore again from here (it never leaves). */
+  private nextLeg() {
+    const h = this.headBoxWorld();
+    this.seed += 1;
+    this.path = planPath({ ...this.spawn, anchorBox: h }, this.seed, { wander: 2, exit: false });
+    this.pathLen = this.path.slice(1).reduce((s, p, i) => s + Math.hypot(p.x - this.path[i].x, p.y - this.path[i].y), 0);
+    this.pos = 0;
+    this.base = { x: h.x + h.w / 2 - this.path[0].x, y: h.y + h.h / 2 - this.path[0].y };
+    this.pauseUntil = this.t + 800 + (this.seed % 7) * 150;
+  }
+  private base = { x: 0, y: 0 };
 
   update(dtMs: number): void {
     this.t += dtMs;
-    if (this.t > this.def.introMs) this.pos = Math.min(this.pathLen, this.pos + dtMs * this.speed * (this.def.pace?.(this.t - this.def.introMs) ?? 1));
+    if (this.t > this.def.introMs && this.t > this.pauseUntil) this.pos = Math.min(this.pathLen, this.pos + dtMs * this.speed * (this.def.pace?.(this.t - this.def.introMs) ?? 1));
+    if (this.pos >= this.pathLen) this.nextLeg();
+    if (this.retireAt !== null) this.fade = Math.max(0, 1 - (this.t - this.retireAt) / RETIRE_MS);
     if (this.flee) {
       this.shove = { x: this.shove.x + this.flee.dir.x * FLEE_SPEED * dtMs, y: this.shove.y + this.flee.dir.y * FLEE_SPEED * dtMs };
       const max = MAX_SHOVE * this.scale * Math.max(this.def.headBox.w, this.def.headBox.h);
@@ -95,7 +127,7 @@ export class RiggedCreature implements Creature {
   /** Rig-units -> world transform parts: world = at + scale * flip(rig - headCenter + bob). */
   private frame() {
     const p = pointAlong(this.path, this.pos);
-    const at = { x: p.x + this.shove.x, y: p.y + this.shove.y };
+    const at = { x: p.x + this.base.x + this.shove.x, y: p.y + this.base.y + this.shove.y };
     const hb = this.def.headBox;
     const bob = this.t > 0 && this.def.bob ? this.def.bob(this.t) : { x: 0, y: 0 };
     return { at, s: this.scale, fx: this.flip ? -1 : 1, cx: hb.x + hb.w / 2 - bob.x, cy: hb.y + hb.h / 2 - bob.y };
@@ -118,7 +150,7 @@ export class RiggedCreature implements Creature {
 
   darkMask(w: number, h: number): Mask {
     const out: Mask = { width: w, height: h, data: new Uint8Array(w * h) };
-    if (this.done || this.alpha < 0.5) return out;
+    if (this.done || this.alpha * this.fade < 0.5) return out;
     // conservative: the head box plus the middle band of the full extent
     for (const b of [this.toWorld(this.def.headBox), this.toWorld(this.def.extent)]) {
       const x0 = Math.max(0, Math.floor(b.x)), x1 = Math.min(w, Math.ceil(b.x + b.w));
@@ -132,7 +164,7 @@ export class RiggedCreature implements Creature {
     if (this.done) return;
     const { at, s, fx, cx, cy } = this.frame();
     ctx.save();
-    applyShadowStyle(ctx, this.alpha);
+    applyShadowStyle(ctx, this.alpha * this.fade);
     ctx.translate(at.x, at.y);
     ctx.scale(fx * s, s);
     ctx.translate(-cx, -cy);

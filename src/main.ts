@@ -33,6 +33,7 @@ let calibrating = false;
 let status = 'not calibrated (press C)';
 let lastRec = '—';
 const watch = new MisalignmentWatch();
+const MAX_CREATURES = 8;
 const STEADY_MS = 300; // only check creatures that have been fully opaque this long (camera/projector lag)
 let darkPx = 0;
 let whyIgnored: string | null = null;
@@ -243,6 +244,9 @@ async function main() {
       const hand = projectBox(scene.puppetBox, calib.camToProj);
       for (const c of creatures) if (c instanceof PeelOff) c.avoid(hand);
     }
+    // the wall keeps what you made, up to a point: the oldest fade out gently
+    const alive = creatures.filter((c) => !c.retiring);
+    for (let i = 0; i < alive.length - MAX_CREATURES; i++) alive[i].retire();
     for (const c of creatures) c.update(dt);
     for (let i = creatures.length - 1; i >= 0; i--) if (creatures[i].done) creatures.splice(i, 1);
 
