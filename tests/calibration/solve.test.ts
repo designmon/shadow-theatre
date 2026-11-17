@@ -137,3 +137,19 @@ describe('honest failure messages', () => {
     expect(new CalibrationError(4, gray(1, 1), mask(1, 1)).message).not.toMatch(/4 of the 4/);
   });
 });
+
+describe('calibrationWarning vs a lamp (real-room report: false "part of the wall was blocked")', () => {
+  const wall = () => fillRect(mask(320, 240), 50, 40, 200, 150, 1);
+  it('does not warn about a lamp-lit corner (bright in the white picture, just not brightened much)', () => {
+    const white = fillRect(gray(320, 240, 20), 50, 40, 200, 150, 190);
+    fillRect(white, 170, 120, 80, 70, 250); // lamp corner: bright
+    const lit = fillRect(fillRect(mask(320, 240), 50, 40, 200, 150, 1), 170, 120, 80, 70, 0); // barely brightened
+    expect(calibrationWarning(wall(), lit, white)).toBeNull();
+  });
+  it('still warns about a person standing in the light (dark in the white picture)', () => {
+    const white = fillRect(gray(320, 240, 20), 50, 40, 200, 150, 190);
+    fillRect(white, 60, 60, 50, 120, 25); // shadow of a person
+    const lit = fillRect(fillRect(mask(320, 240), 50, 40, 200, 150, 1), 60, 60, 50, 120, 0);
+    expect(calibrationWarning(wall(), lit, white)).toMatch(/step out/i);
+  });
+});

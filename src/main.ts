@@ -151,7 +151,7 @@ async function main() {
       // only the projected picture counts as wall: never the room around it
       const wall = wallMask(calib.camToProj, stage.size().w, stage.size().h, calib.whiteRef.width, calib.whiteRef.height);
       lit = litMask(calib.whiteRef, calib.dark);
-      const blocked = calibrationWarning(wall, lit);
+      const blocked = calibrationWarning(wall, lit, calib.whiteRef);
       const litBefore = countOnes(lit);
       for (let i = 0; i < lit.data.length; i++) lit.data[i] &= wall.data[i];
       // diagnostics for the debug view: what the calibration thinks the wall is

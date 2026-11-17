@@ -155,10 +155,21 @@ export function solveCalibration(dark: Gray, patternLit: Gray, white: Gray, cent
   throw new CalibrationError(markers.seen, patternLit, markers.changed);
 }
 
-/** After calibration: was part of the wall dark in the white picture (someone standing in the light)? */
-export function calibrationWarning(wall: Mask, lit: Mask): string | null {
-  let w = 0, both = 0;
-  for (let i = 0; i < wall.data.length; i++) if (wall.data[i]) { w++; both += lit.data[i]; }
+/**
+ * After calibration: did someone stand in the light? Only wall spots that stayed DARK in the
+ * white picture count (a person's shadow). A lamp-lit corner is bright, just not brightened much.
+ */
+export function calibrationWarning(wall: Mask, lit: Mask, white?: Gray): string | null {
+  let w = 0;
+  const litWhite: number[] = [];
+  for (let i = 0; i < wall.data.length; i++) if (wall.data[i]) { w++; if (white && lit.data[i]) litWhite.push(white.data[i]); }
   if (!w) return null;
-  return both / w < 0.9 ? 'part of the wall was blocked while calibrating — step out of the light and press C' : null;
+  litWhite.sort((a, b) => a - b);
+  const typical = litWhite.length ? litWhite[litWhite.length >> 1] : 255;
+  let blocked = 0;
+  for (let i = 0; i < wall.data.length; i++) {
+    if (!wall.data[i] || lit.data[i]) continue;
+    if (!white || white.data[i] < 0.6 * typical) blocked++; // stayed dark: a shadow, not a lamp
+  }
+  return blocked / w > 0.1 ? 'part of the wall stayed dark while calibrating (someone in the light?) — step out of the light and press C' : null;
 }
