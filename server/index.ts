@@ -2,7 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { createServer } from 'node:http';
 import { saveCapture } from './captures';
 import { handleHealth, type HealthClient } from './health';
-import { jevHealth, recognizeWithJev } from './jev';
+import { jevHealth, recognizeDoodleWithJev, recognizeWithJev } from './jev';
 import { CLIENT_OPTIONS, handleRecognize, UNKNOWN, type RecognizeClient } from './recognize';
 
 const PORT = Number(process.env.PORT ?? 8787);
@@ -19,6 +19,14 @@ try {
 createServer(async (req, res) => {
   const json = (body: unknown) => res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(body));
   if (req.method === 'GET' && req.url === '/api/health') return json(OPENROUTER_KEY ? await jevHealth(OPENROUTER_KEY) : await handleHealth(anthropic as unknown as HealthClient, { keySet: !!process.env.ANTHROPIC_API_KEY }));
+  if (req.method === 'POST' && req.url === '/api/doodle') {
+    const chunks: Buffer[] = [];
+    for await (const c of req) chunks.push(c as Buffer);
+    const png = Buffer.concat(chunks), started = Date.now();
+    const rec = OPENROUTER_KEY ? await recognizeDoodleWithJev(png, OPENROUTER_KEY) : { what: 'something', motion: 'float', confidence: 0, note: 'set OPENROUTER_API_KEY to recognise drawings' };
+    console.log(`[doodle] ${rec.what} → ${rec.motion} (${rec.confidence.toFixed(2)}) in ${Date.now() - started} ms${rec.note ? '  — ' + rec.note : ''}`);
+    return json(rec);
+  }
   if (req.method !== 'POST' || req.url !== '/api/recognize') {
     res.writeHead(404).end();
     return;

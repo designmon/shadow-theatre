@@ -166,3 +166,32 @@ describe('big shapes with tall ears (review of a real-room report)', () => {
     expect(s.puppetBox.y).toBeLessThanOrEqual(48);     // ears included
   });
 });
+
+describe('pointing with one finger (laser drawing)', () => {
+  const lit = fillRect(mask(W, H), 20, 20, 280, 200, 1);
+  const armWithHand = () => {
+    const m = mask(W, H);
+    fillRect(m, 20, 110, 90, 14, 1);  // arm from the left edge
+    fillRect(m, 105, 100, 28, 30, 1); // fist
+    return m;
+  };
+  it('one long thin finger is pointing, with the tip at its end', () => {
+    const m = armWithHand();
+    fillRect(m, 133, 108, 34, 5, 1); // index finger
+    const s = analyzeScene(m, findBlobs(m), lit)!;
+    expect(s.pointing).toBe(true);
+    expect(s.tip.x).toBeGreaterThanOrEqual(164);
+    expect(s.tipDir.x).toBeGreaterThan(0.8);
+  });
+  it('two fingers (a rabbit) is not pointing', () => {
+    const m = armWithHand();
+    fillRect(m, 133, 102, 30, 5, 1);
+    fillRect(m, 133, 118, 30, 5, 1);
+    expect(analyzeScene(m, findBlobs(m), lit)!.pointing).toBe(false);
+  });
+  it('a wide snout (a dog) is not pointing', () => {
+    const m = armWithHand();
+    fillRect(m, 133, 104, 30, 18, 1);
+    expect(analyzeScene(m, findBlobs(m), lit)!.pointing).toBe(false);
+  });
+});

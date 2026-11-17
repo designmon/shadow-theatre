@@ -89,3 +89,44 @@ export async function jevHealth(apiKey: string, fetchFn: typeof fetch = fetch): 
 }
 
 const clamp01 = (v: number) => Math.min(1, Math.max(0, Number.isFinite(v) ? v : 0.5));
+
+/** What a fingertip drawing might be. 'something' = anything else (it still comes alive). */
+export const DOODLE_THINGS = ['dog', 'rabbit', 'butterfly', 'swan', 'heart', 'bird', 'fish', 'cat', 'snake', 'flower', 'star', 'sun', 'tree', 'house', 'face', 'something'];
+const DOODLE_MOTIONS = {
+  fly: 'It would fly: bird, butterfly, bat, bee, plane, dragon, a heart with wings.',
+  swim: 'It would swim: fish, whale, shark, octopus, boat.',
+  slither: 'It would slither or wriggle: snake, worm, eel, a long wavy line.',
+  hop: 'It would hop or bounce: rabbit, frog, kangaroo, ball, heart, star.',
+  walk: 'It would walk: dog, cat, horse, person, any animal with legs, a house on legs.',
+  sway: 'It stays and sways: flower, tree, plant, grass.',
+  float: 'It would float or drift: sun, cloud, balloon, face, a shape or scribble, anything else.',
+};
+export type DoodleRecognition = { what: string; motion: keyof typeof DOODLE_MOTIONS; confidence: number; note?: string };
+
+/** "What did they draw, and how would it move?" — one fast Jev request. Never throws. */
+export async function recognizeDoodleWithJev(png: Buffer, apiKey: string, fetchFn: typeof fetch = fetch): Promise<DoodleRecognition> {
+  const fallback = (note: string): DoodleRecognition => ({ what: 'something', motion: 'float', confidence: 0, note });
+  try {
+    const res = await fetchFn(ENDPOINT, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+      body: JSON.stringify({
+        model: MODEL,
+        state: ['A simple line drawing made with a fingertip on a wall (black lines on white). It may be rough.', { type: 'image_url', image_url: { url: `data:image/png;base64,${png.toString('base64')}` } }],
+        questions: {
+          what: { type: 'choice', instructions: 'What does this drawing most look like?', criteria: Object.fromEntries(DOODLE_THINGS.map((k) => [k, k === 'something' ? 'Anything else, or unclear.' : null])) },
+          motion: { type: 'choice', instructions: 'If this drawing came alive, how would it move?', criteria: DOODLE_MOTIONS },
+        },
+      }),
+    });
+    if (!res.ok) return fallback(`Jev error ${res.status}`);
+    const { answers } = await res.json();
+    const what = answers?.what?.choice ?? 'something';
+    const motion = (answers?.motion?.choice in DOODLE_MOTIONS ? answers.motion.choice : 'float') as DoodleRecognition['motion'];
+    const confidence = answers?.what?.probabilities?.[what] ?? answers?.what?.confidence ?? 0;
+    return { what, motion, confidence };
+  } catch (err) {
+    return fallback(`Jev unreachable: ${err instanceof Error ? err.message : err}`);
+  }
+}

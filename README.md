@@ -77,9 +77,20 @@ export ANTHROPIC_API_KEY=sk-ant-...
 npm run server
 ```
 
+## Draw with your fingertip
+
+Point **one finger** into the light and hold it still for about a second: a red ring fills up,
+then a **red laser dot** appears just past your fingertip. Move your finger to draw. Pull your
+hand away (or hold still) to finish. The drawing is recognised — *what is it, and how would it
+move?* — and comes alive: wings flap, a fish ripples, a flower sways, anything else floats, hops
+or waddles. A drawn dog, rabbit, butterfly, swan or heart melts into the full animal.
+
+Nothing leaves the wall: creatures and drawings keep exploring and settle, building up a living
+picture. Once there are more than 8, the oldest fades away.
+
 ## Try it without a projector
 
-`http://localhost:5173/?sim=dog` (or `rabbit`, `butterfly`, `swan`) replaces
+`http://localhost:5173/?sim=dog` (or `rabbit`, `butterfly`, `swan`, `point` for drawing) replaces
 the webcam with a simulator: it films the page like a camera and adds a fake
 arm and hand that reach in and hold still.
 

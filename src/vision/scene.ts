@@ -1,8 +1,9 @@
-import type { Box, Mask, Side } from '../types';
+import type { Box, Mask, Pt, Side } from '../types';
 import type { Blob } from './blobs';
 
 /** neck: cross-width of the shadow just behind the puppet / the puppet's cross-width (null if nothing behind it). */
-export type Scene = { puppet: Mask; puppetBox: Box; entry: Side | null; openSide: Side; bodyBox: Box | null; neck: number | null };
+/** pointing: one thin finger sticking out (laser drawing); tip: its fingertip; tipDir: which way it points. */
+export type Scene = { puppet: Mask; puppetBox: Box; entry: Side | null; openSide: Side; bodyBox: Box | null; neck: number | null; pointing: boolean; tip: Pt; tipDir: Pt };
 
 const TIP_FRACTION = 0.3;
 const MIN_TIP_FRACTION = 0.12; // smallest puppet window, of the wall size
@@ -44,7 +45,7 @@ export function analyzeScene(mask: Mask, blobs: Blob[], lit?: Mask): Scene | nul
     const b = blob.box;
     const gaps: Record<Side, number> = { left: b.x, right: W - (b.x + b.w), up: b.y, down: H - (b.y + b.h) };
     const openSide = sides.reduce((a, c) => (gaps[c] > gaps[a] ? c : a));
-    return { puppet, puppetBox: b, entry: null, openSide, bodyBox: null, neck: null };
+    return { puppet, puppetBox: b, entry: null, openSide, bodyBox: null, neck: null, pointing: false, tip: { x: b.x + b.w / 2, y: b.y + b.h / 2 }, tipDir: { x: 0, y: 0 } };
   }
   ax /= n; ay /= n;
 
@@ -143,7 +144,8 @@ export function analyzeScene(mask: Mask, blobs: Blob[], lit?: Mask): Scene | nul
     return hi < lo ? 0 : hi - lo + 1;
   };
   const neck = band.length ? extent(band) / Math.max(1, extent(hand)) : null;
-  return { puppet, puppetBox: boxOf(tip, W)!, entry: opposite[openSide], openSide, bodyBox: boxOf(body, W), neck };
+  const finger = pointingFinger(blob.pixels, dist, far, W, Math.max(wallW, wallH));
+  return { puppet, puppetBox: boxOf(tip, W)!, entry: opposite[openSide], openSide, bodyBox: boxOf(body, W), neck, ...finger };
 }
 
 const MAX_PUPPET_FRACTION = 0.5; // of the lit wall (bodies are caught by the hand-sticking-out rule)
@@ -187,4 +189,39 @@ export function sceneLit(lit: Mask, ignored: Mask): Mask {
   const data = new Uint8Array(lit.data.length);
   for (let i = 0; i < data.length; i++) data[i] = lit.data[i] && !ignored.data[i] ? 1 : 0;
   return { width: lit.width, height: lit.height, data };
+}
+
+/**
+ * One finger pointing: the last stretch of the shadow (along the shadow) is a single thin piece.
+ * Two fingers (rabbit ears) give two pieces; a snout or a beak is too wide.
+ */
+function pointingFinger(pixels: Int32Array, dist: Int32Array, far: number, W: number, wallSize: number): { pointing: boolean; tip: Pt; tipDir: Pt } {
+  const fingerW = Math.max(3, wallSize * 0.035), L = 2.5 * fingerW;
+  const end: number[] = [];
+  let tipI = -1;
+  for (const i of pixels) {
+    if (dist[i] >= far - L) end.push(i);
+    if (dist[i] === far && tipI < 0) tipI = i;
+  }
+  const tip = { x: (tipI % W) + 0.5, y: ((tipI / W) | 0) + 0.5 };
+  // how many separate pieces is the end made of?
+  const inEnd = new Set(end), seen = new Set<number>();
+  let pieces = 0;
+  for (const s of end) {
+    if (seen.has(s)) continue;
+    pieces++;
+    const stack = [s];
+    seen.add(s);
+    while (stack.length) {
+      const i = stack.pop()!, x = i % W;
+      for (const j of [x > 0 ? i - 1 : -1, x < W - 1 ? i + 1 : -1, i - W, i + W]) if (j >= 0 && inEnd.has(j) && !seen.has(j)) { seen.add(j); stack.push(j); }
+    }
+  }
+  let cx = 0, cy = 0;
+  for (const i of end) { cx += i % W; cy += (i / W) | 0; }
+  cx = cx / Math.max(1, end.length) + 0.5; cy = cy / Math.max(1, end.length) + 0.5;
+  const dx = tip.x - cx, dy = tip.y - cy, d = Math.hypot(dx, dy) || 1;
+  const pointing = pieces === 1 && end.length <= L * fingerW * 1.1 && far > 1.6 * L; // a finger sticking out of something
+  if ((globalThis as any).__trace) (globalThis as any).__finger = { pieces, end: end.length, maxEnd: L * fingerW * 1.1, far, L, fingerW, wallSize };
+  return { pointing, tip, tipDir: { x: dx / d, y: dy / d } };
 }

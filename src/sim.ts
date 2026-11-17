@@ -4,7 +4,7 @@
  * fake performer: a body shadow on one side and an arm + hand shape that
  * reaches in, holds still, and pulls back. Lets the whole loop run without hardware.
  */
-type Shape = 'dog' | 'rabbit' | 'butterfly' | 'swan' | 'blob';
+type Shape = 'dog' | 'rabbit' | 'butterfly' | 'swan' | 'blob' | 'point';
 
 export function installSimCamera(stage: () => HTMLCanvasElement): void {
   const params = new URLSearchParams(location.search);
@@ -46,10 +46,16 @@ export function installSimCamera(stage: () => HTMLCanvasElement): void {
       const reach = Math.min(1, cycle / 1.2) * (cycle > 5 ? Math.max(0, 6 - cycle) : 1);
       ctx.fillStyle = 'rgba(8,8,8,1)';
       ctx.fillRect(40, 140, 90, 360); // body against the left of the wall
-      const hx = 130 + reach * 200;
-      ctx.fillRect(130, 250, hx - 130, 26 * big); // arm
+      let hx = 130 + reach * 200, hy = 262;
+      if (shape === 'point' && cycle > 2.6 && cycle < 5) {
+        // draw a loop with the fingertip (after holding still to get the laser)
+        const a = ((cycle - 2.6) / 2.4) * Math.PI * 2;
+        hx += Math.sin(a) * 70; hy += (1 - Math.cos(a)) * 35;
+      }
+      ctx.save(); ctx.lineWidth = 26 * big; ctx.strokeStyle = 'rgba(8,8,8,1)'; ctx.lineCap = 'butt';
+      ctx.beginPath(); ctx.moveTo(130, 263); ctx.lineTo(hx, hy + 1); ctx.stroke(); ctx.restore(); // arm
       ctx.save();
-      ctx.translate(hx, 262);
+      ctx.translate(hx, hy);
       ctx.scale(big, big);
       drawHand(ctx, shape, 0, 0);
       ctx.restore();
@@ -101,6 +107,9 @@ function drawHand(ctx: CanvasRenderingContext2D, shape: Shape, x: number, y: num
     ctx.rect(x - 10, y - 90, 18, 100);
     ctx.ellipse(x + 10, y - 95, 22, 13, 0, 0, Math.PI * 2);
     ctx.moveTo(x + 28, y - 100); ctx.lineTo(x + 55, y - 92); ctx.lineTo(x + 28, y - 88);
+  } else if (shape === 'point') {
+    ctx.ellipse(x + 14, y, 20, 17, 0, 0, Math.PI * 2); // fist
+    ctx.rect(x + 28, y - 4, 46, 8); // index finger
   } else {
     ctx.ellipse(x + 25, y, 35, 28, 0, 0, Math.PI * 2);
   }

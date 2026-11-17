@@ -20,6 +20,10 @@ import { buildExpected, dilate, erode, keepInside, litMask, shadowMask, smoothMa
 import { installSimCamera } from './sim';
 import { recognize } from './recognize/client';
 import { maskToPng, snapshotRegion } from './vision/snapshot';
+import { LaserPen, type PenState } from './draw/pen';
+import { Doodle, type Motion } from './draw/doodle';
+import { doodleMask, doodleToPng, drawPen } from './draw/render';
+import { applyH } from './calibration/homography';
 
 const stage = createStage();
 if (new URLSearchParams(location.search).has('sim')) installSimCamera(() => stage.canvas);
@@ -34,6 +38,32 @@ let status = 'not calibrated (press C)';
 let lastRec = '—';
 const watch = new MisalignmentWatch();
 const MAX_CREATURES = 8;
+const pen = new LaserPen();
+let penState: PenState = { mode: 'idle', arm: 0, cursor: null, stroke: [] };
+const RIGGED = ['dog', 'rabbit', 'butterfly', 'swan', 'heart'];
+let lastPointingAt = -Infinity;
+const POINTING_QUIET_MS = 1500; // a finger seen pointing recently is a pen, never a puppet
+
+/** A finished fingertip drawing: it appears as drawn, then comes alive (or melts into an animal). */
+function bringDrawingToLife(stroke: { x: number; y: number }[]): void {
+  const { w, h } = stage.size();
+  const doodle = new Doodle(stroke, { w, h });
+  creatures.push(doodle);
+  doodleToPng(stroke)
+    .then((png) => fetch('/api/doodle', { method: 'POST', body: png, headers: { 'content-type': 'image/png' } }))
+    .then((r) => (r.ok ? r.json() : { what: 'something', motion: 'float', confidence: 0 }))
+    .catch(() => ({ what: 'something', motion: 'float', confidence: 0 }))
+    .then((rec: { what: string; motion: Motion; confidence: number; note?: string }) => {
+      lastRec = `drawing: ${rec.what} → ${rec.motion}${rec.note ? ' — ' + rec.note : ''}`;
+      if (RIGGED.includes(rec.what) && rec.confidence >= 0.5) {
+        // it's one of our animals: the drawing melts into it, right where it was drawn
+        const shape = doodleMask(stroke);
+        const peel = new PeelOff(shape, { anchorBox: shape.box, facing: 'right', openSide: shape.box.x < w / 2 ? 'right' : 'left', wall: { w, h }, avoid: null }, shape.box, { stay: true });
+        creatures.splice(creatures.indexOf(doodle), 1, peel);
+        peel.resolve({ kind: rec.what as 'dog', confidence: rec.confidence, facing: 'right', anchor: { x: 0.5, y: 0.5 } });
+      } else doodle.comeAlive(rec.motion);
+    });
+}
 const STEADY_MS = 300; // only check creatures that have been fully opaque this long (camera/projector lag)
 let darkPx = 0;
 let whyIgnored: string | null = null;
@@ -77,6 +107,26 @@ function projectedDarkInCamera(frame: Gray, withOverlay = true, steadyOnly = fal
   const H = calib!.camToProj.map((v, i) => (i < 6 ? v * DARK_SCALE : v)); // camera px -> small px
   const cam = warpMask(small, H, frame.width, frame.height);
   return withOverlay ? dilate(cam, 2) : cam; // dilate for masking (blur halo), exact for the alignment check
+}
+
+/** Where the laser cue and the line being drawn are (camera px): ignored as shadows, but not an "edge". */
+let penCanvas: OffscreenCanvas | null = null;
+function penInCamera(frame: Gray): Mask | null {
+  if (penState.mode === 'idle' || !calib) return null;
+  const { w, h } = stage.size();
+  const dw = Math.ceil(w * DARK_SCALE), dh = Math.ceil(h * DARK_SCALE);
+  if (!penCanvas || penCanvas.width !== dw || penCanvas.height !== dh) penCanvas = new OffscreenCanvas(dw, dh);
+  const pctx = penCanvas.getContext('2d', { willReadFrequently: true })! as unknown as CanvasRenderingContext2D;
+  pctx.setTransform(1, 0, 0, 1, 0, 0);
+  pctx.clearRect(0, 0, dw, dh);
+  pctx.setTransform(DARK_SCALE, 0, 0, DARK_SCALE, 0, 0);
+  drawPen(pctx, penState);
+  pctx.setTransform(1, 0, 0, 1, 0, 0);
+  const rgba = pctx.getImageData(0, 0, dw, dh).data;
+  const small: Mask = { width: dw, height: dh, data: new Uint8Array(dw * dh) };
+  for (let i = 0; i < small.data.length; i++) small.data[i] = rgba[i * 4 + 3] > 40 ? 1 : 0;
+  const H = calib.camToProj.map((v, i) => (i < 6 ? v * DARK_SCALE : v));
+  return dilate(warpMask(small, H, frame.width, frame.height), 2);
 }
 
 let lastCapUrl: string | null = null;
@@ -207,7 +257,9 @@ async function main() {
     let mask: Mask;
     let scene: Scene | null = null;
     if (calib) {
-      const dark = projectedDarkInCamera(frame);
+      const shapesDark = projectedDarkInCamera(frame); // our creatures + on-wall panels
+      const penDark = penInCamera(frame);
+      const dark = penDark ? { ...shapesDark, data: shapesDark.data.map((v, i) => v | penDark.data[i]) } : shapesDark;
       darkPx = countOnes(dark);
       mask = shadowMask(frame, buildExpected(calib.whiteRef, dark), 0.45, calib.dark);
       const rawPx = countOnes(mask);
@@ -218,11 +270,21 @@ async function main() {
       const steady = creatures.length ? erode(projectedDarkInCamera(frame, false, true), 2) : null;
       const score = steady && countOnes(steady) >= 1000 ? alignmentScore(frame, calib.whiteRef, steady, calib.dark) : null;
       if (watch.push(score, now)) { status = 'projector moved — re-aligning'; calibrate(true); return; }
-      scene = analyzeScene(mask, findBlobs(mask), lit ? sceneLit(lit, dark) : undefined);
+      scene = analyzeScene(mask, findBlobs(mask), lit ? sceneLit(lit, shapesDark) : undefined); // the laser cue is not where a shadow comes from
       if (scene) checklist.shadow('ok', 'seen — make a shape and hold it still', now);
       if (scene && lit) whyIgnored = usableReason(scene, own ?? { width: frame.width, height: frame.height, data: new Uint8Array(frame.data.length) }, lit);
       const usable = scene && lit && isUsablePuppet(scene, own ?? { width: frame.width, height: frame.height, data: new Uint8Array(frame.data.length) }, lit);
-      if (scene && usable && hold.push(scene.puppet, now)) {
+      // fingertip laser: point one finger and hold to draw
+      const tipCam = scene?.pointing ? { x: scene.tip.x + scene.tipDir.x * 3, y: scene.tip.y + scene.tipDir.y * 3 } : null;
+      penState = pen.update(tipCam ? applyH(calib.camToProj, tipCam) : null, now);
+      const finished = pen.takeFinished();
+      if (finished) bringDrawingToLife(finished);
+      if (scene?.pointing) lastPointingAt = now;
+      if ((window as any).__trace) { (window as any).__mask = mask; (window as any).__lit = lit; }
+      if ((window as any).__trace) console.log('[trace]', Math.round(now), scene ? `pointing=${scene.pointing} tip=${Math.round(scene.tip.x)},${Math.round(scene.tip.y)} box=${JSON.stringify(scene.puppetBox)} usable=${!!usable}` : 'no scene', penState.mode);
+      const penNearby = penState.mode !== 'idle' || now - lastPointingAt < POINTING_QUIET_MS;
+      if (penNearby) hold.reset(); // a pointing finger is a pen, not a puppet
+      if (scene && usable && !penNearby && hold.push(scene.puppet, now)) {
         const peel = spawnPeel(scene);
         console.log('[shadow] captured', JSON.stringify({ entry: scene.entry, openSide: scene.openSide, puppetBox: scene.puppetBox, bodyBox: scene.bodyBox, neck: scene.neck }));
         maskToPng(scene.puppet, scene.puppetBox, SNAP_PAD).then((png) => {
@@ -259,8 +321,9 @@ async function main() {
 
     clearWhite(stage);
     for (const c of creatures) c.draw(stage.ctx);
+    drawPen(stage.ctx, penState);
     if (debug) {
-      const lines = [status, scene ? `shadow from ${scene.entry ?? 'nowhere'} → open ${scene.openSide}` : 'no shadow', `${creatures.length} creature(s)`, `last seen: ${lastRec}`, `ignoring ${darkPx} px`, calibInfo, shadowInfo, scene ? `shape: ${whyIgnored ?? 'usable ✓'}` : ''];
+      const lines = [status, scene ? `shadow from ${scene.entry ?? 'nowhere'} → open ${scene.openSide}` : 'no shadow', `${creatures.length} creature(s)`, `last seen: ${lastRec}`, `ignoring ${darkPx} px`, calibInfo, shadowInfo, scene ? `shape: ${scene.pointing ? 'one finger (pen) ✎' : whyIgnored ?? 'usable ✓'}` : '', `pen: ${penState.mode}`];
       if (recorder.recording) lines.push('● REC');
       // before calibration it can't tell wall from room: don't paint the room red
       drawDebug(stage.ctx, { frame, mask: calib ? mask : { width: frame.width, height: frame.height, data: new Uint8Array(frame.data.length) }, fps, lines, puppetBox: scene?.puppetBox ?? null });

@@ -38,13 +38,13 @@ export class PeelOff implements Creature {
   private morphStart = 0;
 
   /** `snapBox`: projector box of the image sent for recognition (anchor coords are relative to it). */
-  constructor(protected shape: { mask: Mask; box: Box }, protected spawn: Spawn, private snapBox: Box = shape.box) {
+  constructor(protected shape: { mask: Mask; box: Box }, protected spawn: Spawn, private snapBox: Box = shape.box, opts: { stay?: boolean } = {}) {
     const d = DIRS[spawn.openSide];
     const b = shape.box, { w, h } = spawn.wall;
     // room between the shape's leading edge and the wall edge it is heading to
     const room = d.x > 0 ? w - (b.x + b.w) : d.x < 0 ? b.x : d.y > 0 ? h - (b.y + b.h) : b.y;
     const dist = Math.min((d.x !== 0 ? b.w : b.h) + GAP, Math.max(0, room / 2));
-    this.slideTo = { x: d.x * dist, y: d.y * dist };
+    this.slideTo = opts.stay ? { x: 0, y: 0 } : { x: d.x * dist, y: d.y * dist }; // a drawing melts where it is
   }
 
   get done(): boolean {
