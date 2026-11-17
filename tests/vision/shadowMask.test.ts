@@ -95,3 +95,25 @@ describe('keepInside', () => {
     expect(bbox(keepInside(m, wall))).toEqual({ x: 50, y: 50, w: 10, h: 10 });
   });
 });
+
+describe('room not fully dark (real-room report: white 180 / black 136)', () => {
+  it('finds a soft shadow that is only a bit darker than the white wall', () => {
+    const white = gray(320, 240, 180), black = gray(320, 240, 136);
+    const frame = fillRect(gray(320, 240, 180), 100, 80, 60, 50, 140); // shadow = room light only
+    const m = shadowMask(frame, buildExpected(white, mask(320, 240)), 0.45, black);
+    expect(bbox(m)).toEqual({ x: 100, y: 80, w: 60, h: 50 });
+  });
+  it('ignores small brightness wobble on the white wall', () => {
+    const white = gray(320, 240, 180), black = gray(320, 240, 136);
+    const frame = fillRect(gray(320, 240, 180), 100, 80, 60, 50, 168);
+    expect(count(shadowMask(frame, buildExpected(white, mask(320, 240)), 0.45, black))).toBe(0);
+  });
+  it('still copes with the camera darkening everything (auto-exposure)', () => {
+    const white = gray(320, 240, 180), black = gray(320, 240, 136);
+    const frame = gray(320, 240, 0);
+    for (let i = 0; i < frame.data.length; i++) frame.data[i] = 180 * 0.7;
+    fillRect(frame, 100, 80, 60, 50, Math.round(140 * 0.7));
+    const m = shadowMask(frame, buildExpected(white, mask(320, 240)), 0.45, black);
+    expect(bbox(m)).toEqual({ x: 100, y: 80, w: 60, h: 50 });
+  });
+});

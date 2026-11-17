@@ -5,7 +5,7 @@ import type { Gray, Mask } from '../types';
  * the fraction of projected-dark (lit-wall) pixels that the camera sees dark.
  * 1 when nothing is projected dark.
  */
-export function alignmentScore(frame: Gray, whiteRef: Gray, projectedDarkCam: Mask): number {
+export function alignmentScore(frame: Gray, whiteRef: Gray, projectedDarkCam: Mask, black?: Gray): number {
   const ratios: number[] = [];
   for (let i = 0; i < frame.data.length; i += 7) {
     if (!projectedDarkCam.data[i] && whiteRef.data[i] >= 40) ratios.push(frame.data[i] / whiteRef.data[i]);
@@ -17,7 +17,8 @@ export function alignmentScore(frame: Gray, whiteRef: Gray, projectedDarkCam: Ma
   for (let i = 0; i < frame.data.length; i++) {
     if (!projectedDarkCam.data[i] || whiteRef.data[i] < 40) continue;
     total++;
-    if (frame.data[i] < 0.45 * gain * whiteRef.data[i]) dark++;
+    const thr = black ? gain * (black.data[i] + 0.5 * (whiteRef.data[i] - black.data[i])) : 0.45 * gain * whiteRef.data[i];
+    if (frame.data[i] < thr) dark++;
   }
   return total === 0 ? 1 : dark / total;
 }

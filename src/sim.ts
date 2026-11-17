@@ -52,6 +52,11 @@ export function installSimCamera(stage: () => HTMLCanvasElement): void {
       drawHand(ctx, shape, 0, 0);
       ctx.restore();
     }
+    if (params.has('ambient')) {
+      // room light: everything gets brighter, so shadows are only a bit darker than the wall
+      ctx.fillStyle = `rgba(200,200,200,${params.get('ambient') || 0.6})`;
+      ctx.fillRect(0, 0, 640, 480);
+    }
     if (room) {
       // how bright is the projected picture right now (spill light on the furniture)
       pctx.drawImage(stage(), 0, 0, 4, 4);

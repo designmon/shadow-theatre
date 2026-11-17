@@ -16,7 +16,7 @@ function percentile(values: Uint8ClampedArray, p: number): number {
  * Real-shadow mask. Without `expected`, a global threshold at `ratio` x the
  * 90th-percentile brightness (the lit wall).
  */
-export function shadowMask(frame: Gray, expected: Gray | null, ratio = 0.45): Mask {
+export function shadowMask(frame: Gray, expected: Gray | null, ratio = 0.45, black?: Gray): Mask {
   const { width, height, data } = frame;
   const out: Mask = { width, height, data: new Uint8Array(width * height) };
   if (!expected) {
@@ -38,10 +38,22 @@ export function shadowMask(frame: Gray, expected: Gray | null, ratio = 0.45): Ma
   const gain = upper.length ? upper[Math.floor(upper.length / 2)] : 1;
   for (let i = 0; i < data.length; i++) {
     const e = expected.data[i];
-    out.data[i] = e >= MIN_LIT && data[i] < ratio * gain * e ? 1 : 0;
+    if (e < MIN_LIT) continue;
+    if (black) {
+      // A shadow is where the projector's light is missing: closer to the "projector off" level
+      // than to the white wall. Works in a room that isn't fully dark (white 180 / black 136).
+      const b = black.data[i];
+      if (e - b < MIN_CONTRAST) continue;
+      out.data[i] = data[i] < gain * (b + SPLIT * (e - b)) ? 1 : 0;
+    } else {
+      out.data[i] = data[i] < ratio * gain * e ? 1 : 0;
+    }
   }
   return out;
 }
+
+const SPLIT = 0.5; // halfway between "projector off" and "projector on"
+const MIN_CONTRAST = 12; // the projector must brighten a pixel at least this much to judge it
 
 const MIN_LIT = 40;
 

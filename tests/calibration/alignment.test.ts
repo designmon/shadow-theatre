@@ -20,3 +20,11 @@ describe('alignmentScore', () => {
     expect(alignmentScore(gray(320, 240, 190), ref, mask(320, 240))).toBe(1);
   });
 });
+
+describe('alignment in a room that is not fully dark', () => {
+  it('sees our creature where we project it even if it is only a bit darker', () => {
+    const white = gray(320, 240, 180), black = gray(320, 240, 136);
+    const frame = fillRect(gray(320, 240, 180), 100, 80, 60, 50, 138);
+    expect(alignmentScore(frame, white, dark, black)).toBeGreaterThan(0.9);
+  });
+});

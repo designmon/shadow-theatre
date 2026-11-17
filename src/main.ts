@@ -204,14 +204,14 @@ async function main() {
     if (calib) {
       const dark = projectedDarkInCamera(frame);
       darkPx = countOnes(dark);
-      mask = shadowMask(frame, buildExpected(calib.whiteRef, dark));
+      mask = shadowMask(frame, buildExpected(calib.whiteRef, dark), 0.45, calib.dark);
       const rawPx = countOnes(mask);
       if (lit) mask = keepInside(mask, lit); // shadows only count on the projected picture
       shadowInfo = `shadow px: ${rawPx} seen → ${countOnes(mask)} on wall · ${findBlobs(mask).length} shape(s)`;
       // self-healing: if our creatures stop showing up where we project them, the projector moved
       const own = creatures.length ? projectedDarkInCamera(frame, false) : null;
       const steady = creatures.length ? erode(projectedDarkInCamera(frame, false, true), 2) : null;
-      const score = steady && countOnes(steady) >= 1000 ? alignmentScore(frame, calib.whiteRef, steady) : null;
+      const score = steady && countOnes(steady) >= 1000 ? alignmentScore(frame, calib.whiteRef, steady, calib.dark) : null;
       if (watch.push(score, now)) { status = 'projector moved — re-aligning'; calibrate(true); return; }
       scene = analyzeScene(mask, findBlobs(mask), lit ? sceneLit(lit, dark) : undefined);
       if (scene) checklist.shadow('ok', 'seen — make a shape and hold it still', now);
