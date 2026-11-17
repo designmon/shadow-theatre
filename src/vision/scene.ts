@@ -3,7 +3,9 @@ import type { Blob } from './blobs';
 
 /** neck: cross-width of the shadow just behind the puppet / the puppet's cross-width (null if nothing behind it). */
 /** pointing: one thin finger sticking out (laser drawing); tip: its fingertip; tipDir: which way it points. */
-export type Scene = { puppet: Mask; puppetBox: Box; entry: Side | null; openSide: Side; bodyBox: Box | null; neck: number | null; pointing: boolean; tip: Pt; tipDir: Pt };
+/** pose: point = one finger out (pen draws), fist = closed hand (finish), open = anything else (pen lifted). */
+export type Pose = 'point' | 'fist' | 'open';
+export type Scene = { puppet: Mask; puppetBox: Box; entry: Side | null; openSide: Side; bodyBox: Box | null; neck: number | null; pointing: boolean; tip: Pt; tipDir: Pt; pose: Pose };
 
 const TIP_FRACTION = 0.3;
 const MIN_TIP_FRACTION = 0.12; // smallest puppet window, of the wall size
@@ -45,7 +47,7 @@ export function analyzeScene(mask: Mask, blobs: Blob[], lit?: Mask): Scene | nul
     const b = blob.box;
     const gaps: Record<Side, number> = { left: b.x, right: W - (b.x + b.w), up: b.y, down: H - (b.y + b.h) };
     const openSide = sides.reduce((a, c) => (gaps[c] > gaps[a] ? c : a));
-    return { puppet, puppetBox: b, entry: null, openSide, bodyBox: null, neck: null, pointing: false, tip: { x: b.x + b.w / 2, y: b.y + b.h / 2 }, tipDir: { x: 0, y: 0 } };
+    return { puppet, puppetBox: b, entry: null, openSide, bodyBox: null, neck: null, pointing: false, tip: { x: b.x + b.w / 2, y: b.y + b.h / 2 }, tipDir: { x: 0, y: 0 }, pose: 'open' };
   }
   ax /= n; ay /= n;
 
@@ -144,8 +146,11 @@ export function analyzeScene(mask: Mask, blobs: Blob[], lit?: Mask): Scene | nul
     return hi < lo ? 0 : hi - lo + 1;
   };
   const neck = band.length ? extent(band) / Math.max(1, extent(hand)) : null;
-  const finger = pointingFinger(blob.pixels, dist, far, W, Math.max(wallW, wallH));
-  return { puppet, puppetBox: boxOf(tip, W)!, entry: opposite[openSide], openSide, bodyBox: boxOf(body, W), neck, ...finger };
+  const { pieces, ...finger } = pointingFinger(blob.pixels, dist, far, W, Math.max(wallW, wallH));
+  // fist: a compact end (about as long as it is wide); open: several fingers, or a long flat hand
+  const handLen = far - cut, handW = extent(hand);
+  const pose: Pose = finger.pointing ? 'point' : pieces >= 2 ? 'open' : handLen <= 1.35 * handW ? 'fist' : 'open';
+  return { puppet, puppetBox: boxOf(tip, W)!, entry: opposite[openSide], openSide, bodyBox: boxOf(body, W), neck, ...finger, pose };
 }
 
 const MAX_PUPPET_FRACTION = 0.5; // of the lit wall (bodies are caught by the hand-sticking-out rule)
@@ -195,7 +200,7 @@ export function sceneLit(lit: Mask, ignored: Mask): Mask {
  * One finger pointing: the last stretch of the shadow (along the shadow) is a single thin piece.
  * Two fingers (rabbit ears) give two pieces; a snout or a beak is too wide.
  */
-function pointingFinger(pixels: Int32Array, dist: Int32Array, far: number, W: number, wallSize: number): { pointing: boolean; tip: Pt; tipDir: Pt } {
+function pointingFinger(pixels: Int32Array, dist: Int32Array, far: number, W: number, wallSize: number): { pointing: boolean; tip: Pt; tipDir: Pt; pieces: number } {
   const fingerW = Math.max(3, wallSize * 0.035), L = 2.5 * fingerW;
   const end: number[] = [];
   let tx = 0, ty = 0, tn = 0;
@@ -223,5 +228,5 @@ function pointingFinger(pixels: Int32Array, dist: Int32Array, far: number, W: nu
   const dx = tip.x - cx, dy = tip.y - cy, d = Math.hypot(dx, dy) || 1;
   const pointing = pieces === 1 && end.length <= L * fingerW * 1.1 && far > 1.6 * L; // a finger sticking out of something
   if ((globalThis as any).__trace) (globalThis as any).__finger = { pieces, end: end.length, maxEnd: L * fingerW * 1.1, far, L, fingerW, wallSize };
-  return { pointing, tip, tipDir: { x: dx / d, y: dy / d } };
+  return { pointing, tip, tipDir: { x: dx / d, y: dy / d }, pieces };
 }

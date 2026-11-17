@@ -195,3 +195,25 @@ describe('pointing with one finger (laser drawing)', () => {
     expect(analyzeScene(m, findBlobs(m), lit)!.pointing).toBe(false);
   });
 });
+
+describe('hand pose: point (draw), fist (finish), open (pen lifted)', () => {
+  const lit = fillRect(mask(W, H), 20, 20, 280, 200, 1);
+  const arm = () => fillRect(mask(W, H), 20, 110, 90, 14, 1);
+  const pose = (m: ReturnType<typeof mask>) => analyzeScene(m, findBlobs(m), lit)!.pose;
+  it('one finger out is point', () => {
+    const m = arm(); fillRect(m, 105, 100, 28, 30, 1); fillRect(m, 133, 108, 34, 5, 1);
+    expect(pose(m)).toBe('point');
+  });
+  it('a closed fist is fist', () => {
+    const m = arm(); fillRect(m, 105, 98, 32, 34, 1);
+    expect(pose(m)).toBe('fist');
+  });
+  it('two fingers out is open', () => {
+    const m = arm(); fillRect(m, 105, 100, 28, 30, 1); fillRect(m, 133, 102, 30, 5, 1); fillRect(m, 133, 118, 30, 5, 1);
+    expect(pose(m)).toBe('open');
+  });
+  it('a flat hand, fingers together and stretched out, is open', () => {
+    const m = arm(); fillRect(m, 105, 104, 60, 18, 1);
+    expect(pose(m)).toBe('open');
+  });
+});

@@ -169,3 +169,15 @@ export function smoothMask(m: Mask, r: number): Mask {
 export function wallInterior(lit: Mask, margin = 3): Mask {
   return erode(lit, margin);
 }
+
+/**
+ * Where our own ink crosses a hand's shadow, the camera can't tell shadow from ink, so those
+ * pixels were left out and could cut the hand in two. Fill them back in where they bridge a
+ * small gap in the shadow (closing), but never along the ink beyond the hand.
+ */
+export function bridgeOwnInk(shadow: Mask, ownDark: Mask, r = 3): Mask {
+  const closed = erode(dilate(shadow, r), r);
+  const data = new Uint8Array(shadow.data.length);
+  for (let i = 0; i < data.length; i++) data[i] = shadow.data[i] | (closed.data[i] & ownDark.data[i]);
+  return { width: shadow.width, height: shadow.height, data };
+}

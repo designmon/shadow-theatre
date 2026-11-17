@@ -1,13 +1,15 @@
 import type { Pt } from '../types';
 
 type Glint = { x: number; y: number; vx: number; vy: number; age: number; life: number; size: number; spin: number; twinkle: number };
+type Ring = { x: number; y: number; age: number; life: number; r: number };
 
 const MAX = 400;
-const GOLD = ['255,206,92', '255,226,140', '255,183,77'];
+import { accentAt } from './render';
 
 /** Golden glints: a trail behind the pen tip, bursts when it starts and finishes. */
 export class Sparkles {
   private g: Glint[] = [];
+  private rings: Ring[] = [];
   private last: Pt | null = null;
   private carry = 0;
   private seed: number;
@@ -38,19 +40,21 @@ export class Sparkles {
     this.g.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 0.02, age: 0, life: life * (0.6 + this.rand() * 0.8), size: size * (0.6 + this.rand() * 0.8), spin: this.rand() * Math.PI, twinkle: this.rand() * 10 });
   }
 
-  burst(at: Pt, n = 30): void {
-    for (let i = 0; i < n; i++) this.add(at.x, at.y, 0.25, 1100, 9);
+  /** A single expanding hairline ring and a few specks: understated, not confetti. */
+  burst(at: Pt, n = 14, ringRadius = 90): void {
+    this.rings.push({ x: at.x, y: at.y, age: 0, life: 900, r: ringRadius });
+    for (let i = 0; i < n; i++) this.add(at.x, at.y, 0.18, 1000, 3.5);
   }
 
   /** Glints shed behind the moving tip: more when it moves faster, none when it rests. */
   trail(tip: Pt, dtMs: number): void {
     if (this.last) {
       const moved = Math.hypot(tip.x - this.last.x, tip.y - this.last.y);
-      this.carry += moved / 9;
+      this.carry += moved / 26; // sparing: a speck every ~26 px
       while (this.carry >= 1) {
         this.carry -= 1;
         const k = this.rand();
-        this.add(this.last.x + (tip.x - this.last.x) * k, this.last.y + (tip.y - this.last.y) * k, 0.05, 900, 6);
+        this.add(this.last.x + (tip.x - this.last.x) * k, this.last.y + (tip.y - this.last.y) * k, 0.035, 1100, 2.6);
       }
     }
     this.last = { ...tip };
@@ -71,32 +75,24 @@ export class Sparkles {
       p.vx *= 0.985; p.vy = p.vy * 0.985 + 0.00004 * dtMs; // slow down, settle gently
     }
     this.g = this.g.filter((p) => p.age < p.life);
+    for (const r of this.rings) r.age += dtMs;
+    this.rings = this.rings.filter((r) => r.age < r.life);
   }
 
   draw(ctx: CanvasRenderingContext2D): void {
     ctx.save();
     ctx.filter = 'none';
-    ctx.globalCompositeOperation = 'source-over';
+    for (const r of this.rings) {
+      const k = r.age / r.life, e = 1 - (1 - k) ** 3;
+      ctx.strokeStyle = `rgba(${accentAt(k)},${(1 - k) * 0.9})`;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(r.x, r.y, 10 + r.r * e, 0, Math.PI * 2); ctx.stroke();
+    }
     for (const p of this.g) {
       const k = p.age / p.life, fade = k < 0.15 ? k / 0.15 : 1 - (k - 0.15) / 0.85;
-      const tw = 0.6 + 0.4 * Math.sin(p.twinkle + p.age / 70);
-      const r = p.size * (0.6 + 0.4 * tw) * (1 - k * 0.5);
-      const c = GOLD[Math.floor(p.twinkle) % GOLD.length];
-      // soft glow
-      const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r * 1.8);
-      g.addColorStop(0, `rgba(${c},${0.55 * fade})`);
-      g.addColorStop(1, `rgba(${c},0)`);
-      ctx.fillStyle = g;
-      ctx.beginPath(); ctx.arc(p.x, p.y, r * 1.8, 0, Math.PI * 2); ctx.fill();
-      // four-point star
-      ctx.fillStyle = `rgba(${c},${fade})`;
-      ctx.beginPath();
-      for (let i = 0; i < 8; i++) {
-        const a = p.spin + (i / 8) * Math.PI * 2, rr = i % 2 ? r * 0.28 : r;
-        ctx.lineTo(p.x + Math.cos(a) * rr, p.y + Math.sin(a) * rr);
-      }
-      ctx.closePath();
-      ctx.fill();
+      const tw = 0.6 + 0.4 * Math.sin(p.twinkle + p.age / 90);
+      ctx.fillStyle = `rgba(${accentAt((p.twinkle % 10) / 10)},${fade * tw})`;
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.size * (1 - k * 0.4), 0, Math.PI * 2); ctx.fill();
     }
     ctx.restore();
   }

@@ -45,9 +45,17 @@ export function grabGray(video: HTMLVideoElement, w = 320, h = 240): Gray {
   const ctx = scratch.getContext('2d', { willReadFrequently: true })!;
   ctx.drawImage(video, 0, 0, W, H);
   const rgba = ctx.getImageData(0, 0, W, H).data;
-  const full = new Uint8ClampedArray(W * H);
-  for (let i = 0, j = 0; j < full.length; i += 4, j++) full[j] = (rgba[i] * 77 + rgba[i + 1] * 150 + rgba[i + 2] * 29) >> 8;
-  return minPool2(full, W, H);
+  return minPool2(rgbaToBright(rgba, W * H), W, H);
+}
+
+/**
+ * Brightness as the strongest colour channel: projected colour (a vivid blue or magenta glow)
+ * reads as lit, only the absence of light (a shadow, black ink) reads as dark.
+ */
+export function rgbaToBright(rgba: Uint8ClampedArray, n: number): Uint8ClampedArray {
+  const out = new Uint8ClampedArray(n);
+  for (let i = 0, j = 0; j < n; i += 4, j++) out[j] = Math.max(rgba[i], rgba[i + 1], rgba[i + 2]);
+  return out;
 }
 
 /** Halve a picture, keeping the darkest pixel of each 2x2 block. */

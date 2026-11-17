@@ -16,13 +16,13 @@ import { HoldDetector } from './vision/hold';
 import { projectBox, projectMask } from './vision/project';
 import { analyzeScene, isUsablePuppet, sceneLit, usableReason, type Scene } from './vision/scene';
 import { setBlur } from './creatures/style';
-import { buildExpected, dilate, erode, keepInside, litMask, shadowMask, smoothMask, wallInterior } from './vision/shadowMask';
+import { bridgeOwnInk, buildExpected, dilate, erode, keepInside, litMask, shadowMask, smoothMask, wallInterior } from './vision/shadowMask';
 import { installSimCamera } from './sim';
 import { recognize } from './recognize/client';
 import { maskToPng, snapshotRegion } from './vision/snapshot';
 import { LaserPen, type PenState } from './draw/pen';
-import { Doodle, type Motion } from './draw/doodle';
-import { doodleToPng, drawInkMask, drawPen } from './draw/render';
+import { Doodle, motionFor, type Motion } from './draw/doodle';
+import { accentAt, doodleToPng, drawInkMask, drawPen } from './draw/render';
 import { Sparkles } from './draw/sparkles';
 import { applyH } from './calibration/homography';
 
@@ -43,22 +43,38 @@ const pen = new LaserPen();
 const sparkles = new Sparkles();
 /** Shadow-puppet recognition (hold a hand shape -> animal). Off while the fingertip pen is the focus. */
 const PUPPETS = false;
-let penState: PenState = { mode: 'idle', arm: 0, cursor: null, stroke: [] };
+let penState: PenState = { mode: 'idle', arm: 0, cursor: null, strokes: [] };
+const ROW_SLOTS = 9; // drawings rest in a row along the bottom of the wall
+let hovered: { d: Doodle; since: number; seen: number } | null = null; // a resting drawing the fingertip points at
+const WAKE_DWELL_MS = 500;
 let lastPointingAt = -Infinity;
 const POINTING_QUIET_MS = 1500; // a finger seen pointing recently is a pen, never a puppet
 
-/** A finished fingertip drawing: it appears as drawn, then comes alive (or melts into an animal). */
-function bringDrawingToLife(stroke: { x: number; y: number }[]): void {
+/** The row along the bottom where drawings rest: the next free place (the oldest makes room). */
+function restingPlace(d: Doodle): { at: { x: number; y: number }; scale: number } {
   const { w, h } = stage.size();
-  const doodle = new Doodle(stroke, { w, h });
+  const doodles = creatures.filter((c): c is Doodle => c instanceof Doodle && !c.retiring);
+  if (doodles.length > ROW_SLOTS) doodles[0].retire();
+  const index = (doodles.indexOf(d) + Math.max(0, doodles.length - ROW_SLOTS)) % ROW_SLOTS;
+  const slotW = w / ROW_SLOTS;
+  return { at: { x: w - slotW * (index + 0.5), y: h - Math.min(h * 0.11, slotW * 0.45) }, scale: Math.min(0.5, (slotW * 0.7) / d.drawnSize) };
+}
+
+/** A finished fingertip drawing: appears as drawn, refines, is recognised and comes alive. */
+function bringDrawingToLife(strokes: { x: number; y: number }[][]): void {
+  const { w, h } = stage.size();
+  const doodle = new Doodle(strokes, { w, h });
   creatures.push(doodle);
-  doodleToPng(stroke)
+  const place = restingPlace(doodle);
+  doodle.park(place.at, place.scale);
+  doodleToPng(strokes)
     .then((png) => fetch('/api/doodle', { method: 'POST', body: png, headers: { 'content-type': 'image/png' } }))
     .then((r) => (r.ok ? r.json() : { what: 'something', motion: 'float', confidence: 0 }))
     .catch(() => ({ what: 'something', motion: 'float', confidence: 0 }))
     .then((rec: { what: string; motion: Motion; confidence: number; note?: string }) => {
-      lastRec = `drawing: ${rec.what} → ${rec.motion}${rec.note ? ' — ' + rec.note : ''}`;
-      doodle.comeAlive(rec.motion); // always your own line, refined, brought to life
+      const motion = motionFor(rec.what, rec.motion);
+      lastRec = `drawing: ${rec.what} → ${motion}${rec.note ? ' — ' + rec.note : ''}`;
+      doodle.comeAlive(motion, rec.what); // your own line, refined, with the motion that fits it
     });
 }
 const STEADY_MS = 300; // only check creatures that have been fully opaque this long (camera/projector lag)
@@ -74,7 +90,7 @@ const DARK_SCALE = 0.25; // render creatures at quarter size to find what we act
 let darkCanvas: OffscreenCanvas | null = null;
 
 /** What we actually project dark (creatures as drawn, plus the debug overlay), in camera space. */
-function projectedDarkInCamera(frame: Gray, withOverlay = true, steadyOnly = false): Mask {
+function projectedDarkInCamera(frame: Gray, withOverlay = true, steadyOnly = false, withCreatures = true): Mask {
   const { w, h } = stage.size();
   const dw = Math.ceil(w * DARK_SCALE), dh = Math.ceil(h * DARK_SCALE);
   if (!darkCanvas || darkCanvas.width !== dw || darkCanvas.height !== dh) darkCanvas = new OffscreenCanvas(dw, dh);
@@ -83,7 +99,7 @@ function projectedDarkInCamera(frame: Gray, withOverlay = true, steadyOnly = fal
   dctx.clearRect(0, 0, dw, dh);
   dctx.setTransform(DARK_SCALE, 0, 0, DARK_SCALE, 0, 0);
   setBlur(false); // the mask pass doesn't need the soft edge (and blur is slow)
-  for (const c of creatures) if (!steadyOnly || (c.steadyMs ?? 0) >= STEADY_MS) c.draw(dctx);
+  if (withCreatures) for (const c of creatures) if (!steadyOnly || (c.steadyMs ?? 0) >= STEADY_MS) c.draw(dctx);
   setBlur(true);
   dctx.setTransform(1, 0, 0, 1, 0, 0);
   const rgba = dctx.getImageData(0, 0, dw, dh).data;
@@ -109,7 +125,7 @@ function projectedDarkInCamera(frame: Gray, withOverlay = true, steadyOnly = fal
 /** Where the laser cue and the line being drawn are (camera px): ignored as shadows, but not an "edge". */
 let penCanvas: OffscreenCanvas | null = null;
 function penInCamera(frame: Gray): Mask | null {
-  if (penState.mode !== 'drawing' || !calib) return null;
+  if (penState.mode === 'idle' || penState.mode === 'arming' || !calib) return null;
   const { w, h } = stage.size();
   const dw = Math.ceil(w * DARK_SCALE), dh = Math.ceil(h * DARK_SCALE);
   if (!penCanvas || penCanvas.width !== dw || penCanvas.height !== dh) penCanvas = new OffscreenCanvas(dw, dh);
@@ -259,6 +275,8 @@ async function main() {
       const dark = penDark ? { ...shapesDark, data: shapesDark.data.map((v, i) => v | penDark.data[i]) } : shapesDark;
       darkPx = countOnes(dark);
       mask = shadowMask(frame, buildExpected(calib.whiteRef, dark), 0.45, calib.dark);
+      // a hand reaching across a drawing is cut in two where our own ink is: join it back up
+      mask = bridgeOwnInk(mask, dark, 5);
       const rawPx = countOnes(mask);
       if (lit) mask = keepInside(mask, lit); // shadows only count on the projected picture
       shadowInfo = `shadow px: ${rawPx} seen → ${countOnes(mask)} on wall · ${findBlobs(mask).length} shape(s)`;
@@ -267,7 +285,7 @@ async function main() {
       const steady = creatures.length ? erode(projectedDarkInCamera(frame, false, true), 2) : null;
       const score = steady && countOnes(steady) >= 1000 ? alignmentScore(frame, calib.whiteRef, steady, calib.dark) : null;
       if (watch.push(score, now)) { status = 'projector moved — re-aligning'; calibrate(true); return; }
-      scene = analyzeScene(mask, findBlobs(mask), lit ? sceneLit(lit, shapesDark) : undefined); // the laser cue is not where a shadow comes from
+      scene = analyzeScene(mask, findBlobs(mask), lit ? sceneLit(lit, projectedDarkInCamera(frame, true, false, false)) : undefined); // only on-wall panels hide the picture edge — a hand over a drawing still comes from the real edge
       if (scene) checklist.shadow('ok', 'seen — make a shape and hold it still', now);
       if (scene && lit) whyIgnored = usableReason(scene, own ?? { width: frame.width, height: frame.height, data: new Uint8Array(frame.data.length) }, lit);
       const usable = scene && lit && isUsablePuppet(scene, own ?? { width: frame.width, height: frame.height, data: new Uint8Array(frame.data.length) }, lit);
@@ -281,14 +299,30 @@ async function main() {
         const dx = tipProj.x - back.x, dy = tipProj.y - back.y, d = Math.hypot(dx, dy) || 1;
         dirProj = { x: dx / d, y: dy / d }; // which way the finger points, on the wall
       }
-      penState = pen.update(tipProj, now, dirProj);
+      // pointing at a resting drawing (pen not in use): hover, then wake it — and don't start the pen
+      // (any hand but a fist: the fingertip lands on the drawing's own ink, where its shadow can't be seen)
+      const found = tipProj && scene && scene.pose !== 'fist' && (penState.mode === 'idle' || penState.mode === 'arming')
+        ? creatures.find((c): c is Doodle => c instanceof Doodle && c.parked && c.hit(tipProj!)) : undefined;
+      const resting = found ?? (hovered && now - hovered.seen < 300 ? hovered.d : undefined); // ride out a dropped frame
+      if (resting) {
+        if ((window as any).__trace) console.log('[trace] hover', Math.round(now));
+        if (hovered?.d !== resting) hovered = { d: resting, since: now, seen: now };
+        if (found) hovered.seen = now;
+        if (now - hovered.since > WAKE_DWELL_MS) {
+          const b = resting.box();
+          resting.wake();
+          sparkles.burst({ x: b.x + b.w / 2, y: b.y + b.h / 2 }, 10, Math.max(b.w, b.h) / 2 + 30);
+          hovered = null;
+        }
+      } else hovered = null;
+      penState = pen.update(tipProj && scene && !resting ? { tip: tipProj, pose: scene.pose, dir: dirProj } : null, now);
       const finished = pen.takeFinished();
       if (finished) bringDrawingToLife(finished);
-      for (const b of pen.takeBursts()) sparkles.burst(b.at, b.kind === 'finish' ? 60 : 28);
-      if (penState.mode === 'drawing' && penState.cursor) sparkles.trail(penState.cursor, dt); else sparkles.lift();
+      for (const b of pen.takeBursts()) sparkles.burst(b.at, b.kind === 'finish' ? 16 : 10, b.kind === 'finish' ? 140 : 70);
+      if (penState.mode === 'down' && penState.cursor) sparkles.trail(penState.cursor, dt); else sparkles.lift();
       if (scene?.pointing) lastPointingAt = now;
       if ((window as any).__trace) { (window as any).__mask = mask; (window as any).__lit = lit; }
-      if ((window as any).__trace) console.log('[trace]', Math.round(now), scene ? `pointing=${scene.pointing} tip=${Math.round(scene.tip.x)},${Math.round(scene.tip.y)} box=${JSON.stringify(scene.puppetBox)} usable=${!!usable}` : 'no scene', penState.mode);
+      if ((window as any).__trace) console.log('[trace]', Math.round(now), scene ? `pointing=${scene.pointing} tip=${Math.round(scene.tip.x)},${Math.round(scene.tip.y)} box=${JSON.stringify(scene.puppetBox)} usable=${!!usable}` : 'no scene', penState.mode, scene?.pose ?? '');
       const penNearby = penState.mode !== 'idle' || now - lastPointingAt < POINTING_QUIET_MS;
       if (penNearby) hold.reset(); // a pointing finger is a pen, not a puppet
       if (PUPPETS && scene && usable && !penNearby && hold.push(scene.puppet, now)) {
@@ -331,8 +365,19 @@ async function main() {
     for (const c of creatures) c.draw(stage.ctx);
     drawPen(stage.ctx, penState);
     sparkles.draw(stage.ctx);
+    if (hovered) {
+      // a resting drawing under the fingertip: a ring fills up, then it wakes
+      const b = hovered.d.box(), k = Math.min(1, (now - hovered.since) / WAKE_DWELL_MS), r = Math.max(b.w, b.h) / 2 + 18;
+      stage.ctx.save();
+      stage.ctx.strokeStyle = `rgba(${accentAt(k)},0.95)`;
+      stage.ctx.lineWidth = 2.5;
+      stage.ctx.beginPath();
+      stage.ctx.arc(b.x + b.w / 2, b.y + b.h / 2, r, -Math.PI / 2, -Math.PI / 2 + k * Math.PI * 2);
+      stage.ctx.stroke();
+      stage.ctx.restore();
+    }
     if (debug) {
-      const lines = [status, scene ? `shadow from ${scene.entry ?? 'nowhere'} → open ${scene.openSide}` : 'no shadow', `${creatures.length} creature(s)`, `last seen: ${lastRec}`, `ignoring ${darkPx} px`, calibInfo, shadowInfo, scene ? `shape: ${scene.pointing ? 'one finger (pen) ✎' : whyIgnored ?? 'usable ✓'}` : '', `pen: ${penState.mode}`];
+      const lines = [status, scene ? `shadow from ${scene.entry ?? 'nowhere'} → open ${scene.openSide}` : 'no shadow', `${creatures.length} creature(s)`, `last seen: ${lastRec}`, `ignoring ${darkPx} px`, calibInfo, shadowInfo, scene ? `shape: ${scene.pointing ? 'one finger (pen) ✎' : whyIgnored ?? 'usable ✓'}` : '', `pen: ${penState.mode} · hand: ${scene?.pose ?? '—'}`];
       if (recorder.recording) lines.push('● REC');
       // before calibration it can't tell wall from room: don't paint the room red
       drawDebug(stage.ctx, { frame, mask: calib ? mask : { width: frame.width, height: frame.height, data: new Uint8Array(frame.data.length) }, fps, lines, puppetBox: scene?.puppetBox ?? null });

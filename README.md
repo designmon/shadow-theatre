@@ -69,29 +69,64 @@ fails it asks you to step out of the beam and press **C**.
 
 ### Recognition key
 
-The server reads `ANTHROPIC_API_KEY` (or an `ant auth login` profile). Without
-it, shapes still peel off and drift away; they just aren't recognized.
+With `OPENROUTER_API_KEY` set, the server uses a decision model on OpenRouter (Jev by default:
+fast, cheap). Otherwise it falls back to Claude via `ANTHROPIC_API_KEY`. Without either,
+drawings still come alive; they just float, unrecognised. Keys stay in your terminal and the
+local server. They are never sent to the browser.
 
 ```bash
-export ANTHROPIC_API_KEY=sk-ant-...
-npm run server
+export OPENROUTER_API_KEY=sk-or-...
+npm start
 ```
 
 ## Draw with your fingertip
 
-Put your hand in the light and **hold your fingertip still** for a moment: a golden ring
-gathers, sparkles burst, and your fingertip becomes a **glowing pen**. Draw; your line is
-smoothed as you go. **Pull your hand away** (or hold still) to finish: the line settles into
-its refined shape with a burst of sparkles, gets recognised (what is it, how would it move?)
-and comes alive right where you drew it — wings flap, a fish swims a little figure-eight,
-a heart beats, a star twinkles, a flower sways, the sun turns.
+Your hand is the pen, with three gestures:
 
-Drawings stay on the wall; once there are more than 8, the oldest fades away.
-(Shadow-puppet animals are switched off for now: `PUPPETS` in `src/main.ts`.)
+| Gesture | What happens |
+| --- | --- |
+| **Point one finger** and rest it a moment | a thin ring closes, a soft burst: the pen is on, at your fingertip |
+| **Move while pointing** | you draw. The newest bit of line glows blue → violet → pink, then settles into black ink. Your own line, smoothed as you go |
+| **Open your hand** | lifts the pen: move somewhere else, point again for the next stroke (eyes, whiskers…) |
+| **Close your hand into a fist** | done. (Pulling your hand out of the light also finishes) |
+
+When you finish, your line is refined (a rough heart, star or circle eases toward a clean one),
+recognised, and briefly labelled. Then it moves the way that thing moves: a heart beats, a cat
+or dog walks (each in its own way), a bird flies, a fish swims, a star twinkles, the sun turns,
+a flower sways. After a few seconds it **walks to its place in a row along the bottom of the
+wall**, filling from the bottom-right corner. **Point at a resting drawing** and hold for half a
+second (a ring fills around it) and it wakes up and performs again. Nine drawings fit in the
+row; after that the oldest makes room.
+
+Colours were chosen to read on a projected wall: black ink, plus a blue / violet / pink accent
+only where something is happening (the pen, the freshest line, bursts, the wake ring).
+Shadow-puppet animals are switched off for now (`PUPPETS` in `src/main.ts`).
+
+### Which model recognises the drawings
+
+Any OpenRouter *decision* model that accepts images works; the default is Jev
+(`typesafe/jev-1.14`). To try another, set `DECISION_MODEL` before `npm start`:
+
+```bash
+export DECISION_MODEL=google/gemini-decision-1
+```
+
+Every drawing you make is saved to `captures/doodles/` with what the model said. To compare
+models on *your* drawings (answer and speed):
+
+```bash
+npm run bakeoff
+```
+
+That runs Jev 1.14, Gemini Decision 1, GPT-6 Luna Decisions, Liquid d1.2-ultra and Perplexity
+Decider (free) over every saved drawing. For an accuracy score, add lines like
+`2026-11-17T20-01-02-123Z-heart.png<TAB>heart` to `captures/doodles/truth.txt`. To pick
+models: `npm run bakeoff -- typesafe/jev-1.14 google/gemini-decision-1`.
 
 ## Try it without a projector
 
-`http://localhost:5173/?sim=dog` (or `rabbit`, `butterfly`, `swan`, `point` for drawing) replaces
+`http://localhost:5173/?sim=dog` (or `rabbit`, `butterfly`, `swan`, `point` for drawing; add `&wake`
+to also point at the resting drawings) replaces
 the webcam with a simulator: it films the page like a camera and adds a fake
 arm and hand that reach in and hold still.
 

@@ -167,3 +167,16 @@ describe('edge of the projected picture (real-room report: the border is taken f
     expect(bbox(wallInterior(lit, 3))).toEqual({ x: 13, y: 13, w: 74, h: 54 });
   });
 });
+
+import { bridgeOwnInk } from '../../src/vision/shadowMask';
+describe('bridgeOwnInk (old drawings must not cut the hand apart)', () => {
+  it('reconnects a hand shadow across an ink line we projected over it', () => {
+    const hand = fillRect(mask(100, 100), 20, 40, 60, 20, 1);
+    fillRect(hand, 48, 40, 4, 20, 0); // our ink line hides a 4 px strip of the hand
+    const ink = fillRect(mask(100, 100), 48, 0, 4, 100, 1); // the line runs the whole height
+    const m = bridgeOwnInk(hand, ink, 3);
+    expect(m.data[50 * 100 + 50]).toBe(1); // bridged inside the hand
+    expect(m.data[10 * 100 + 50]).toBe(0); // the line itself is not part of the hand
+    expect(m.data[90 * 100 + 50]).toBe(0);
+  });
+});

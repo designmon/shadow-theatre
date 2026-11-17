@@ -47,7 +47,12 @@ export function installSimCamera(stage: () => HTMLCanvasElement): void {
       ctx.fillStyle = 'rgba(8,8,8,1)';
       ctx.fillRect(40, 140, 90, 360); // body against the left of the wall
       let hx = 130 + reach * 200, hy = 262;
-      if (shape === 'point' && cycle > 2.6 && cycle < 5) {
+      let pose: Shape = shape;
+      // ?wake: every other visit, point at the drawing resting in the bottom-right corner instead
+      const visiting = shape === 'point' && params.has('wake') && Math.floor((t - start) / 9) % 2 === 1;
+      if (visiting) { hx = 130 + reach * 340; hy = 262 + reach * 160; }
+      if (shape === 'point' && cycle >= 5 && !visiting) pose = 'blob'; // close the hand into a fist: done
+      if (shape === 'point' && cycle > 2.6 && cycle < 5 && !visiting) {
         // draw a loop with the fingertip (after holding still to get the laser)
         const a = ((cycle - 2.6) / 2.4) * Math.PI * 2;
         hx += Math.sin(a) * 70; hy += (1 - Math.cos(a)) * 35;
@@ -57,7 +62,7 @@ export function installSimCamera(stage: () => HTMLCanvasElement): void {
       ctx.save();
       ctx.translate(hx, hy);
       ctx.scale(big, big);
-      drawHand(ctx, shape, 0, 0);
+      drawHand(ctx, pose, 0, 0);
       ctx.restore();
     }
     if (params.has('ambient')) {

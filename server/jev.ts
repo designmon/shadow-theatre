@@ -8,7 +8,8 @@ import { UNKNOWN } from './recognize';
  * Docs: https://openrouter.ai/docs/guides/community/jev.md
  */
 const ENDPOINT = 'https://openrouter.ai/api/alpha/decisions';
-const MODEL = 'typesafe/jev-1.14'; // Box questions need 1.14
+// Any OpenRouter decision model that takes images works here; compare them with `npm run bakeoff`.
+export const MODEL = process.env.DECISION_MODEL || 'typesafe/jev-1.14'; // Box questions (puppets) need jev 1.14
 const MIN_PROBABILITY = 0.5;
 const TIMEOUT_MS = 6000;
 
@@ -91,7 +92,33 @@ export async function jevHealth(apiKey: string, fetchFn: typeof fetch = fetch): 
 const clamp01 = (v: number) => Math.min(1, Math.max(0, Number.isFinite(v) ? v : 0.5));
 
 /** What a fingertip drawing might be. 'something' = anything else (it still comes alive). */
-export const DOODLE_THINGS = ['dog', 'rabbit', 'butterfly', 'swan', 'heart', 'bird', 'fish', 'cat', 'snake', 'flower', 'star', 'sun', 'tree', 'house', 'face', 'something'];
+/** What a fingertip drawing can be. A short hint helps the model with rough, one-line drawings. */
+export const DOODLE_HINTS: Record<string, string | null> = {
+  heart: 'A heart: two round bumps on top meeting in a point at the bottom.',
+  star: 'A star with points (usually five).',
+  circle: 'A plain circle or oval, nothing else.',
+  sun: 'A circle with rays or lines around it.',
+  moon: 'A crescent moon.',
+  cloud: 'A bumpy, puffy cloud outline.',
+  flower: 'A flower: petals around a centre, maybe a stem.',
+  tree: 'A tree: a trunk with a round or pointed top.',
+  cat: 'A cat: pointy ears, whiskers or a long curling tail.',
+  dog: 'A dog: floppy ears, snout, legs, wagging tail.',
+  rabbit: 'A rabbit or bunny: long ears.',
+  bird: 'A bird, or a simple "m"-shaped flying bird.',
+  butterfly: 'A butterfly: two pairs of wings either side of a body.',
+  fish: 'A fish: oval body with a triangle tail.',
+  snake: 'A snake: a long wavy or zigzag line, maybe with a head.',
+  turtle: 'A turtle: a dome shell with little legs and a head.',
+  house: 'A house: a square with a triangle roof.',
+  face: 'A face or smiley: a circle with eyes and a mouth.',
+  person: 'A person or stick figure.',
+  car: 'A car: a body on two wheels.',
+  boat: 'A boat or ship: a hull on water, maybe a sail.',
+  plane: 'An aeroplane.',
+  something: 'Anything else, or unclear.',
+};
+export const DOODLE_THINGS = Object.keys(DOODLE_HINTS);
 const DOODLE_MOTIONS = {
   fly: 'It would fly: bird, butterfly, bat, bee, plane, dragon, a heart with wings.',
   swim: 'It would swim: fish, whale, shark, octopus, boat.',
@@ -107,7 +134,7 @@ const DOODLE_MOTIONS = {
 export type DoodleRecognition = { what: string; motion: keyof typeof DOODLE_MOTIONS; confidence: number; note?: string };
 
 /** "What did they draw, and how would it move?" — one fast Jev request. Never throws. */
-export async function recognizeDoodleWithJev(png: Buffer, apiKey: string, fetchFn: typeof fetch = fetch): Promise<DoodleRecognition> {
+export async function recognizeDoodleWithJev(png: Buffer, apiKey: string, fetchFn: typeof fetch = fetch, model = MODEL): Promise<DoodleRecognition> {
   const fallback = (note: string): DoodleRecognition => ({ what: 'something', motion: 'float', confidence: 0, note });
   try {
     const res = await fetchFn(ENDPOINT, {
@@ -115,21 +142,21 @@ export async function recognizeDoodleWithJev(png: Buffer, apiKey: string, fetchF
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
       signal: AbortSignal.timeout(TIMEOUT_MS),
       body: JSON.stringify({
-        model: MODEL,
+        model,
         state: ['A simple line drawing made with a fingertip on a wall (black lines on white). It may be rough.', { type: 'image_url', image_url: { url: `data:image/png;base64,${png.toString('base64')}` } }],
         questions: {
-          what: { type: 'choice', instructions: 'What does this drawing most look like?', criteria: Object.fromEntries(DOODLE_THINGS.map((k) => [k, k === 'something' ? 'Anything else, or unclear.' : null])) },
+          what: { type: 'choice', instructions: 'What does this drawing most look like?', criteria: DOODLE_HINTS },
           motion: { type: 'choice', instructions: 'If this drawing came alive, how would it move?', criteria: DOODLE_MOTIONS },
         },
       }),
     });
-    if (!res.ok) return fallback(`Jev error ${res.status}`);
+    if (!res.ok) return fallback(`${model} error ${res.status}: ${(await res.text().catch(() => '')).slice(0, 200)}`);
     const { answers } = await res.json();
     const what = answers?.what?.choice ?? 'something';
     const motion = (answers?.motion?.choice in DOODLE_MOTIONS ? answers.motion.choice : 'float') as DoodleRecognition['motion'];
     const confidence = answers?.what?.probabilities?.[what] ?? answers?.what?.confidence ?? 0;
     return { what, motion, confidence };
   } catch (err) {
-    return fallback(`Jev unreachable: ${err instanceof Error ? err.message : err}`);
+    return fallback(`${model} unreachable: ${err instanceof Error ? err.message : err}`);
   }
 }

@@ -48,3 +48,28 @@ and nothing felt delightful. Shadow-puppet recognition is switched off to focus 
 ## Left to the builder
 
 Exact timings, particle counts, filter tuning, the motion curves.
+
+## Revision: after the second wall test (same day)
+
+The user's feedback: the cursor lost the finger and wandered; the yellow was invisible on the
+wall; no delight; drawings should be recognised, beautified and move in character, then come to
+rest; point at one to wake it; gestures to start and stop. What changed:
+
+- **Tracking.** Camera brightness is the max of R, G and B, so coloured light never reads as
+  shadow. The newest stretch of line is drawn in the accent colour (not black), so it can't
+  merge with the fingertip. Where our own ink cuts a hand in two, the gap is bridged.
+  Frames where the tip jumps more than 90 px are ignored. Only on-wall panels (not drawings)
+  hide the picture edge, so a hand reaching over a drawing is still a hand.
+- **Gestures.** Point (rest ~0.35 s; reaching in doesn't draw) = pen on. Open hand
+  (held ~0.3 s; flicker is ignored) = lift. Fist (~0.4 s) = finish. Hand out of the light =
+  finish, without the slide back along the finger. The pose is classified per frame as
+  point / fist / open.
+- **Look.** Black ink and a blue → violet → pink accent (it reads on a projected wall), thin
+  hairline rings, small sparks: quiet, Apple-like. The gold is gone.
+- **Life.** Refine → beautify (heart, star, circle, sun, moon ease 60 % toward an ideal) →
+  label in light caps → about 4 s of motion in character (heart beats, cat and dog walk with
+  different gaits…) → walk to a resting row along the bottom (from the bottom-right corner,
+  9 places, the oldest makes room) → pointing at one for 0.5 s (a ring fills) wakes it.
+- **Model.** `DECISION_MODEL` picks any OpenRouter decision model. There is no public accuracy
+  or latency data comparing them, so `npm run bakeoff` measures them on the user's own saved
+  drawings.
