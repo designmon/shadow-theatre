@@ -43,19 +43,22 @@ export function grabGray(video: HTMLVideoElement, w = 320, h = 240): Gray {
   return grabFrame(video, w, h).luma;
 }
 
+export type RGB = { r: Gray; g: Gray; b: Gray };
+
 /**
- * One camera frame as ordinary brightness (luma). The strongest colour channel was tried for shadows and failed in a lamp-lit room: with warm light the red
- * channel sits near the top of the camera's range, so "projector on" and "off" differ by a few
- * levels and camera noise turned the white wall into "shadow". Coloured ink is handled by
- * predicting what we project instead (shadowMask's `projected`).
+ * One camera frame: ordinary brightness (luma, for calibration and the lit area) and each colour
+ * channel (for finding shadows, see vision/light.ts). Read at twice the size, halved keeping the
+ * darkest pixel of each 2x2 block.
  */
-export function grabFrame(video: HTMLVideoElement, w = 320, h = 240): { luma: Gray } {
+export function grabFrame(video: HTMLVideoElement, w = 320, h = 240): { luma: Gray; rgb: RGB } {
   const W = w * 2, H = h * 2;
   if (!scratch || scratch.width !== W || scratch.height !== H) scratch = new OffscreenCanvas(W, H);
   const ctx = scratch.getContext('2d', { willReadFrequently: true })!;
   ctx.drawImage(video, 0, 0, W, H);
   const rgba = ctx.getImageData(0, 0, W, H).data;
-  return { luma: minPool2(rgbaToLuma(rgba, W * H), W, H) };
+  const n = W * H, r = new Uint8ClampedArray(n), g = new Uint8ClampedArray(n), b = new Uint8ClampedArray(n);
+  for (let i = 0, j = 0; j < n; i += 4, j++) { r[j] = rgba[i]; g[j] = rgba[i + 1]; b[j] = rgba[i + 2]; }
+  return { luma: minPool2(rgbaToLuma(rgba, n), W, H), rgb: { r: minPool2(r, W, H), g: minPool2(g, W, H), b: minPool2(b, W, H) } };
 }
 
 /** Ordinary (luminance) brightness. */

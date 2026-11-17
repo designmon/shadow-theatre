@@ -1,6 +1,6 @@
 import { applyShadowStyle } from '../creatures/style';
 
-const INK = '#111';
+import { INK_COLOR as INK } from './render';
 const INK_W = 7; // matches the pen's settled ink (render.ts)
 import type { Creature } from '../creatures/types';
 import type { Box, Mask, Pt } from '../types';
@@ -335,7 +335,7 @@ export class Doodle implements Creature {
       ctx.save();
       ctx.filter = 'none';
       ctx.globalAlpha = a * this.fade;
-      ctx.fillStyle = '#1d1d1f';
+      ctx.fillStyle = INK;
       ctx.font = `300 ${Math.round(20 * devicePixelRatioSafe())}px "SF Pro Display", "Helvetica Neue", system-ui, sans-serif`;
       ctx.textAlign = 'center';
       ctx.letterSpacing = '0.12em';

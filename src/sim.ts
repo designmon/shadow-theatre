@@ -33,7 +33,9 @@ export function installSimCamera(stage: () => HTMLCanvasElement): void {
     // the wall: stage filmed with a mild skew (camera off to the side)
     ctx.save();
     // ?crop: the camera misses the left part of the picture
-    ctx.setTransform(0.85, 0.03, -0.02, 0.88, params.has('crop') ? -110 : 40, 25);
+    // ?shift=<px>: after calibrating, the camera's view is a few pixels off (an imperfect calibration)
+    const shift = t > 3 ? Number(params.get('shift') || 0) : 0;
+    ctx.setTransform(0.85, 0.03, -0.02, 0.88, (params.has('crop') ? -110 : 40) + shift, 25 + shift * 0.5);
     ctx.filter = 'brightness(0.85)';
     ctx.drawImage(stage(), 0, 0, 640, 480);
     ctx.restore();

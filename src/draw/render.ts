@@ -2,9 +2,15 @@ import type { Pt } from '../types';
 import type { PenState } from './pen';
 
 const INK = 7;
-const FRESH_PX = 70; // the freshest stretch of line glows in the accent colour, black only behind it
-/** One vivid accent, shifting blue → violet → magenta: saturated colour stays visible on a bright wall. */
-export const ACCENT = ['47,107,255', '139,61,255', '255,45,135'];
+/**
+ * The ink: a vivid blue, not black. To the camera, black ink looks exactly like a shadow; blue ink
+ * still sends the projector's full blue light, so it reads as lit wall (vision/light.ts).
+ * Every colour we project keeps blue at full strength for the same reason.
+ */
+export const INK_COLOR = 'rgb(35,70,255)';
+const FRESH_PX = 70; // the freshest stretch of line glows in the accent colours, settling into the ink
+/** The accent, shifting blue → violet → magenta (blue at full in each: see INK_COLOR). */
+export const ACCENT = ['47,107,255', '139,61,255', '214,48,255'];
 
 export function accentAt(k: number): string {
   const x = Math.max(0, Math.min(0.999, k)) * (ACCENT.length - 1), i = Math.floor(x), f = x - i;
@@ -40,7 +46,7 @@ export function drawPen(ctx: CanvasRenderingContext2D, pen: PenState, tMs = perf
     if (pts.length < 2) return;
     const live = si === pen.strokes.length - 1 && pen.mode === 'down';
     const [settled, fresh] = live ? splitFresh(pts) : [pts, []];
-    if (settled.length > 1) { ctx.strokeStyle = '#111'; ctx.lineWidth = INK; curve(ctx, settled); ctx.stroke(); }
+    if (settled.length > 1) { ctx.strokeStyle = INK_COLOR; ctx.lineWidth = INK; curve(ctx, settled); ctx.stroke(); }
     for (let i = 1; i < fresh.length; i++) {
       const k = i / fresh.length; // 0 = cooling end, 1 = at the tip
       ctx.strokeStyle = `rgba(${accentAt(k)},${0.55 + 0.45 * k})`;
@@ -68,24 +74,6 @@ export function drawPen(ctx: CanvasRenderingContext2D, pen: PenState, tMs = perf
   ctx.restore();
 }
 
-/**
- * For the camera: only black ink could pass for a shadow (the accent colours read as light).
- * The fresh, glowing stretch next to the fingertip is left out, so the finger is never cut short.
- */
-export function drawInkMask(ctx: CanvasRenderingContext2D, pen: PenState): void {
-  if (pen.mode === 'idle') return;
-  ctx.save();
-  ctx.strokeStyle = '#000';
-  ctx.lineWidth = INK + 4;
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
-  pen.strokes.forEach((pts, si) => {
-    const live = si === pen.strokes.length - 1 && pen.mode === 'down';
-    const settled = live ? splitFresh(pts)[0] : pts;
-    if (settled.length > 1) { curve(ctx, settled); ctx.stroke(); }
-  });
-  ctx.restore();
-}
 
 function strokesOn(ctx: OffscreenCanvasRenderingContext2D, strokes: Pt[][], map: (p: Pt) => Pt, width: number) {
   ctx.fillStyle = ctx.strokeStyle = '#000';

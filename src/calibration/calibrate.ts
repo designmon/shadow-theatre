@@ -1,4 +1,5 @@
-import { grabFrame } from '../camera';
+import { grabFrame, type RGB } from '../camera';
+import { buildLight, type Light } from '../vision/light';
 import type { Stage } from '../stage';
 import { clearWhite } from '../stage';
 import type { Gray, H } from '../types';
@@ -8,7 +9,8 @@ import { dilate } from '../vision/shadowMask';
 import type { Mask } from '../types';
 import { drawCalibrationPattern, findMarkersDetailed } from './pattern';
 
-export type Calibration = { camToProj: H; projToCam: H; whiteRef: Gray; dark: Gray; method?: 'squares' | 'picture' };
+/** whiteRef / dark: ordinary brightness (where the picture is). light: per-channel, for finding shadows. */
+export type Calibration = { camToProj: H; projToCam: H; whiteRef: Gray; dark: Gray; light: Light; method?: 'squares' | 'picture' };
 
 /** Calibration failed: carries what the camera saw, for the setup card. */
 export class CalibrationError extends Error {
@@ -30,24 +32,24 @@ export let lastCalibrationFrames: { dark: Gray; squares: Gray; white: Gray } | n
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Average several frames to suppress projector (DLP) flicker. */
-type Pair = { luma: Gray };
+type Pair = { luma: Gray; rgb: RGB };
 async function grabAveraged(video: HTMLVideoElement, n = 5): Promise<Pair> {
   const frames: Pair[] = [];
   for (let i = 0; i < n; i++) {
     frames.push(grabFrame(video));
     await wait(40);
   }
-  const avg = (key: keyof Pair): Gray => {
-    const { width, height } = frames[0][key];
+  const avg = (pick: (f: Pair) => Gray): Gray => {
+    const { width, height } = pick(frames[0]);
     const data = new Uint8ClampedArray(width * height);
     for (let i = 0; i < data.length; i++) {
       let s = 0;
-      for (const f of frames) s += f[key].data[i];
+      for (const f of frames) s += pick(f).data[i];
       data[i] = s / n;
     }
     return { width, height, data };
   };
-  return { luma: avg('luma') };
+  return { luma: avg((f) => f.luma), rgb: { r: avg((f) => f.rgb.r), g: avg((f) => f.rgb.g), b: avg((f) => f.rgb.b) } };
 }
 
 /** Wait (up to 2 s) until the webcam's auto-exposure has stopped changing the picture. */
@@ -103,7 +105,7 @@ export async function runCalibration(stage: Stage, video: HTMLVideoElement, keep
   if (!solved) throw lastErr;
   console.log('[shadow] calibrated using', solved.method);
   if (keep) return { ...keep, camToProj: solved.camToProj, projToCam: solved.projToCam, method: solved.method };
-  return { camToProj: solved.camToProj, projToCam: solved.projToCam, whiteRef: white.luma, dark: dark.luma, method: solved.method };
+  return { camToProj: solved.camToProj, projToCam: solved.projToCam, whiteRef: white.luma, dark: dark.luma, light: buildLight(dark.rgb, white.rgb), method: solved.method };
 }
 
 const MIN_AGREEMENT = 0.75; // IoU between "where we think the picture is" and "what actually lit up"

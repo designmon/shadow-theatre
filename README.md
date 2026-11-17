@@ -98,8 +98,10 @@ wall**, filling from the bottom-right corner. **Point at a resting drawing** and
 second (a ring fills around it) and it wakes up and performs again. Nine drawings fit in the
 row; after that the oldest makes room.
 
-Colours were chosen to read on a projected wall: black ink, plus a blue / violet / pink accent
-only where something is happening (the pen, the freshest line, bursts, the wake ring).
+The ink is a vivid blue, not black: to the camera black ink looks exactly like a shadow, while
+blue ink still sends the projector's full blue light and reads as lit wall. The accent (blue →
+violet → magenta) appears only where something is happening: the pen, the freshest line, bursts,
+the wake ring.
 Shadow-puppet animals are switched off for now (`PUPPETS` in `src/main.ts`).
 
 ### Which model recognises the drawings

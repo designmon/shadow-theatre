@@ -2,7 +2,8 @@ import { CalibrationError, calibrationWarning, lastCalibrationFrames, runCalibra
 import { alignmentScore } from './calibration/alignment';
 import { wallMask, warpMask } from './calibration/homography';
 import { debounce, MisalignmentWatch } from './calibration/watch';
-import { grabGray, listCameras, saveCameraId, savedCameraId, startCamera } from './camera';
+import { grabFrame, listCameras, saveCameraId, savedCameraId, startCamera } from './camera';
+import { litFrame } from './vision/light';
 import { Checklist, describeHealth, type Health } from './setup/checklist';
 import { SetupPanel } from './setup/panel';
 import { PeelOff } from './creatures/peel';
@@ -140,7 +141,8 @@ function projectedInCamera(frame: Gray): Gray {
   pctx.drawImage(stage.canvas, 0, 0, dw, dh);
   const rgba = pctx.getImageData(0, 0, dw, dh).data;
   const small = new Uint8Array(dw * dh);
-  for (let i = 0; i < small.length; i++) small[i] = (rgba[i * 4] * 77 + rgba[i * 4 + 1] * 150 + rgba[i * 4 + 2] * 29) >> 8;
+  // judged like the camera picture (vision/light.ts): the most-lit colour channel — our blue ink is "lit", black is dark
+  for (let i = 0; i < small.length; i++) small[i] = Math.max(rgba[i * 4], rgba[i * 4 + 1], rgba[i * 4 + 2]);
   const rects = [];
   if (debug) rects.push({ x: 0, y: 0, w: w * 0.18 + 40, h: w * 0.18 * 0.75 + 140 });
   const pr = panel?.rect();
@@ -280,7 +282,9 @@ async function main() {
     fps = fps * 0.9 + (1000 / Math.max(1, dt)) * 0.1;
     last = now;
 
-    const frame = grabGray(video);
+    const grabbed = grabFrame(video);
+    // how lit by the projector each pixel is, per colour channel (vision/light.ts); plain brightness before calibration
+    const frame = calib ? litFrame(grabbed.rgb, calib.light) : grabbed.luma;
     let mask: Mask;
     let scene: Scene | null = null;
     if (calib) {
@@ -288,7 +292,7 @@ async function main() {
       const projected = projectedInCamera(frame);
       const dark = ownInk(projected);
       darkPx = countOnes(dark);
-      mask = shadowMask(frame, calib.whiteRef, 0.45, calib.dark, projected);
+      mask = shadowMask(frame, calib.light.white, 0.45, calib.light.black, projected);
       // a hand reaching across a drawing is cut in two where our own ink is: join it back up
       mask = bridgeOwnInk(mask, dark, 5);
       const rawPx = countOnes(mask);
@@ -297,7 +301,7 @@ async function main() {
       // self-healing: if our creatures stop showing up where we project them, the projector moved
       const own = creatures.length ? projectedDarkInCamera(frame, false) : null;
       const steady = creatures.length ? erode(projectedDarkInCamera(frame, false, true), 2) : null;
-      const score = steady && countOnes(steady) >= 1000 ? alignmentScore(frame, calib.whiteRef, steady, calib.dark) : null;
+      const score = steady && countOnes(steady) >= 1000 ? alignmentScore(grabbed.luma, calib.whiteRef, steady, calib.dark) /* blue ink is dark in plain brightness */ : null;
       if (watch.push(score, now)) { status = 'projector moved — re-aligning'; calibrate(true); return; }
       scene = analyzeScene(mask, findBlobs(mask), lit ? sceneLit(lit, projectedDarkInCamera(frame, true, false, false)) : undefined); // only on-wall panels hide the picture edge — a hand over a drawing still comes from the real edge
       if (scene) checklist.shadow('ok', 'seen — make a shape and hold it still', now);
@@ -372,7 +376,7 @@ async function main() {
     if (panel!.visible) {
       panel!.render(checklist);
       // until calibrated it can't tell wall from room, so show the plain camera picture
-      panel!.drawCamera(frame, calib ? mask : { width: frame.width, height: frame.height, data: new Uint8Array(frame.data.length) });
+      panel!.drawCamera(grabbed.luma, calib ? mask : { width: frame.width, height: frame.height, data: new Uint8Array(frame.data.length) });
       if (checklist.shouldAutoHide(now)) panel!.show(false);
     }
 
@@ -403,7 +407,7 @@ async function main() {
       const lines = [status, scene ? `shadow from ${scene.entry ?? 'nowhere'} → open ${scene.openSide}` : 'no shadow', `${creatures.length} creature(s)`, `last seen: ${lastRec}`, `ignoring ${darkPx} px`, calibInfo, shadowInfo, scene ? `shape: ${scene.pointing ? 'one finger (pen) ✎' : whyIgnored ?? 'usable ✓'}` : '', `pen: ${penState.mode} · hand: ${scene?.pose ?? '—'}`];
       if (recorder.recording) lines.push('● REC');
       // before calibration it can't tell wall from room: don't paint the room red
-      drawDebug(stage.ctx, { frame, mask: calib ? mask : { width: frame.width, height: frame.height, data: new Uint8Array(frame.data.length) }, fps, lines, puppetBox: scene?.puppetBox ?? null });
+      drawDebug(stage.ctx, { frame: grabbed.luma, mask: calib ? mask : { width: frame.width, height: frame.height, data: new Uint8Array(frame.data.length) }, fps, lines, puppetBox: scene?.puppetBox ?? null });
     }
   };
   requestAnimationFrame(tick);
