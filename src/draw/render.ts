@@ -3,38 +3,82 @@ import type { PenState } from './pen';
 
 const INK = 8;
 
-/** The laser cue and the line being drawn (on the stage, and in the "what we project" mask). */
-export function drawPen(ctx: CanvasRenderingContext2D, pen: PenState): void {
+/**
+ * Only the black ink can be mistaken for a shadow (the glow and sparkles are bright gold).
+ * Leaves out the last stretch next to the fingertip: the finger's own shadow is there, and
+ * hiding it would cut the finger short.
+ */
+export function drawInkMask(ctx: CanvasRenderingContext2D, pen: PenState, clearRadius = 45): void {
+  if (pen.mode !== 'drawing' || !pen.cursor || pen.stroke.length < 2) return;
+  const { x, y } = pen.cursor;
+  const pts = pen.stroke.filter((p) => Math.hypot(p.x - x, p.y - y) > clearRadius);
+  if (pts.length < 2) return;
+  ctx.save();
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth = INK;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  curve(ctx, pts);
+  ctx.stroke();
+  ctx.restore();
+}
+
+/** Smooth curve through points (quadratic through midpoints). */
+function curve(ctx: CanvasRenderingContext2D, pts: Pt[]) {
+  ctx.beginPath();
+  ctx.moveTo(pts[0].x, pts[0].y);
+  for (let i = 1; i < pts.length - 1; i++) {
+    const mx = (pts[i].x + pts[i + 1].x) / 2, my = (pts[i].y + pts[i + 1].y) / 2;
+    ctx.quadraticCurveTo(pts[i].x, pts[i].y, mx, my);
+  }
+  const z = pts[pts.length - 1];
+  ctx.lineTo(z.x, z.y);
+}
+
+/** The pen tip and the line being drawn: ink that blooms in gold behind a glowing tip. */
+export function drawPen(ctx: CanvasRenderingContext2D, pen: PenState, tMs = performance.now()): void {
   if (pen.mode === 'idle' || !pen.cursor) return;
   ctx.save();
   ctx.filter = 'none';
   ctx.globalAlpha = 1;
-  if (pen.stroke.length > 1) {
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  const pts = pen.stroke;
+  if (pts.length > 1) {
     ctx.strokeStyle = '#000';
     ctx.lineWidth = INK;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.beginPath();
-    pen.stroke.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+    curve(ctx, pts);
     ctx.stroke();
+    // the freshest ink still glows gold for a moment
+    const fresh = pts.slice(-14);
+    for (let i = 1; i < fresh.length; i++) {
+      const k = i / fresh.length;
+      ctx.strokeStyle = `rgba(255,200,80,${0.85 * k})`;
+      ctx.lineWidth = INK * (1.1 + 0.6 * k);
+      ctx.beginPath(); ctx.moveTo(fresh[i - 1].x, fresh[i - 1].y); ctx.lineTo(fresh[i].x, fresh[i].y); ctx.stroke();
+    }
   }
   const { x, y } = pen.cursor;
+  const pulse = 1 + 0.12 * Math.sin(tMs / 120);
   if (pen.mode === 'arming') {
-    // a ring that fills up while you hold your finger
-    ctx.strokeStyle = '#e0282b';
+    // a golden ring gathers while you hold still
+    ctx.strokeStyle = 'rgba(255,190,70,0.95)';
     ctx.lineWidth = 4;
     ctx.beginPath();
-    ctx.arc(x, y, 22, -Math.PI / 2, -Math.PI / 2 + pen.arm * Math.PI * 2);
+    ctx.arc(x, y, 26, -Math.PI / 2, -Math.PI / 2 + pen.arm * Math.PI * 2);
     ctx.stroke();
+    ctx.fillStyle = `rgba(255,200,90,${0.25 + 0.5 * pen.arm})`;
+    ctx.beginPath(); ctx.arc(x, y, 6 + 6 * pen.arm, 0, Math.PI * 2); ctx.fill();
   } else {
-    const g = ctx.createRadialGradient(x, y, 0, x, y, 18);
-    g.addColorStop(0, 'rgba(255,40,40,1)');
-    g.addColorStop(0.35, 'rgba(255,40,40,0.9)');
-    g.addColorStop(1, 'rgba(255,40,40,0)');
+    // a glowing pen tip: warm halo, bright core
+    const r = 26 * pulse;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, 'rgba(255,255,235,1)');
+    g.addColorStop(0.25, 'rgba(255,214,110,0.95)');
+    g.addColorStop(0.6, 'rgba(255,170,60,0.35)');
+    g.addColorStop(1, 'rgba(255,150,40,0)');
     ctx.fillStyle = g;
-    ctx.beginPath();
-    ctx.arc(x, y, 18, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
   }
   ctx.restore();
 }

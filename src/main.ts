@@ -22,7 +22,8 @@ import { recognize } from './recognize/client';
 import { maskToPng, snapshotRegion } from './vision/snapshot';
 import { LaserPen, type PenState } from './draw/pen';
 import { Doodle, type Motion } from './draw/doodle';
-import { doodleMask, doodleToPng, drawPen } from './draw/render';
+import { doodleToPng, drawInkMask, drawPen } from './draw/render';
+import { Sparkles } from './draw/sparkles';
 import { applyH } from './calibration/homography';
 
 const stage = createStage();
@@ -39,8 +40,10 @@ let lastRec = '—';
 const watch = new MisalignmentWatch();
 const MAX_CREATURES = 8;
 const pen = new LaserPen();
+const sparkles = new Sparkles();
+/** Shadow-puppet recognition (hold a hand shape -> animal). Off while the fingertip pen is the focus. */
+const PUPPETS = false;
 let penState: PenState = { mode: 'idle', arm: 0, cursor: null, stroke: [] };
-const RIGGED = ['dog', 'rabbit', 'butterfly', 'swan', 'heart'];
 let lastPointingAt = -Infinity;
 const POINTING_QUIET_MS = 1500; // a finger seen pointing recently is a pen, never a puppet
 
@@ -55,13 +58,7 @@ function bringDrawingToLife(stroke: { x: number; y: number }[]): void {
     .catch(() => ({ what: 'something', motion: 'float', confidence: 0 }))
     .then((rec: { what: string; motion: Motion; confidence: number; note?: string }) => {
       lastRec = `drawing: ${rec.what} → ${rec.motion}${rec.note ? ' — ' + rec.note : ''}`;
-      if (RIGGED.includes(rec.what) && rec.confidence >= 0.5) {
-        // it's one of our animals: the drawing melts into it, right where it was drawn
-        const shape = doodleMask(stroke);
-        const peel = new PeelOff(shape, { anchorBox: shape.box, facing: 'right', openSide: shape.box.x < w / 2 ? 'right' : 'left', wall: { w, h }, avoid: null }, shape.box, { stay: true });
-        creatures.splice(creatures.indexOf(doodle), 1, peel);
-        peel.resolve({ kind: rec.what as 'dog', confidence: rec.confidence, facing: 'right', anchor: { x: 0.5, y: 0.5 } });
-      } else doodle.comeAlive(rec.motion);
+      doodle.comeAlive(rec.motion); // always your own line, refined, brought to life
     });
 }
 const STEADY_MS = 300; // only check creatures that have been fully opaque this long (camera/projector lag)
@@ -112,7 +109,7 @@ function projectedDarkInCamera(frame: Gray, withOverlay = true, steadyOnly = fal
 /** Where the laser cue and the line being drawn are (camera px): ignored as shadows, but not an "edge". */
 let penCanvas: OffscreenCanvas | null = null;
 function penInCamera(frame: Gray): Mask | null {
-  if (penState.mode === 'idle' || !calib) return null;
+  if (penState.mode !== 'drawing' || !calib) return null;
   const { w, h } = stage.size();
   const dw = Math.ceil(w * DARK_SCALE), dh = Math.ceil(h * DARK_SCALE);
   if (!penCanvas || penCanvas.width !== dw || penCanvas.height !== dh) penCanvas = new OffscreenCanvas(dw, dh);
@@ -120,7 +117,7 @@ function penInCamera(frame: Gray): Mask | null {
   pctx.setTransform(1, 0, 0, 1, 0, 0);
   pctx.clearRect(0, 0, dw, dh);
   pctx.setTransform(DARK_SCALE, 0, 0, DARK_SCALE, 0, 0);
-  drawPen(pctx, penState);
+  drawInkMask(pctx, penState); // only the black ink could pass for a shadow; the glow and sparkles are bright
   pctx.setTransform(1, 0, 0, 1, 0, 0);
   const rgba = pctx.getImageData(0, 0, dw, dh).data;
   const small: Mask = { width: dw, height: dh, data: new Uint8Array(dw * dh) };
@@ -275,16 +272,26 @@ async function main() {
       if (scene && lit) whyIgnored = usableReason(scene, own ?? { width: frame.width, height: frame.height, data: new Uint8Array(frame.data.length) }, lit);
       const usable = scene && lit && isUsablePuppet(scene, own ?? { width: frame.width, height: frame.height, data: new Uint8Array(frame.data.length) }, lit);
       // fingertip laser: point one finger and hold to draw
-      const tipCam = scene?.pointing ? { x: scene.tip.x + scene.tipDir.x * 3, y: scene.tip.y + scene.tipDir.y * 3 } : null;
-      penState = pen.update(tipCam ? applyH(calib.camToProj, tipCam) : null, now);
+      // the pen follows the fingertip (the far end of the hand's shadow), nudged past it onto the wall
+      const tipCam = scene && (PUPPETS ? scene.pointing : true) ? { x: scene.tip.x + scene.tipDir.x * 3, y: scene.tip.y + scene.tipDir.y * 3 } : null;
+      let tipProj: { x: number; y: number } | null = null, dirProj: { x: number; y: number } | undefined;
+      if (tipCam && scene) {
+        tipProj = applyH(calib.camToProj, tipCam);
+        const back = applyH(calib.camToProj, { x: tipCam.x - scene.tipDir.x * 6, y: tipCam.y - scene.tipDir.y * 6 });
+        const dx = tipProj.x - back.x, dy = tipProj.y - back.y, d = Math.hypot(dx, dy) || 1;
+        dirProj = { x: dx / d, y: dy / d }; // which way the finger points, on the wall
+      }
+      penState = pen.update(tipProj, now, dirProj);
       const finished = pen.takeFinished();
       if (finished) bringDrawingToLife(finished);
+      for (const b of pen.takeBursts()) sparkles.burst(b.at, b.kind === 'finish' ? 60 : 28);
+      if (penState.mode === 'drawing' && penState.cursor) sparkles.trail(penState.cursor, dt); else sparkles.lift();
       if (scene?.pointing) lastPointingAt = now;
       if ((window as any).__trace) { (window as any).__mask = mask; (window as any).__lit = lit; }
       if ((window as any).__trace) console.log('[trace]', Math.round(now), scene ? `pointing=${scene.pointing} tip=${Math.round(scene.tip.x)},${Math.round(scene.tip.y)} box=${JSON.stringify(scene.puppetBox)} usable=${!!usable}` : 'no scene', penState.mode);
       const penNearby = penState.mode !== 'idle' || now - lastPointingAt < POINTING_QUIET_MS;
       if (penNearby) hold.reset(); // a pointing finger is a pen, not a puppet
-      if (scene && usable && !penNearby && hold.push(scene.puppet, now)) {
+      if (PUPPETS && scene && usable && !penNearby && hold.push(scene.puppet, now)) {
         const peel = spawnPeel(scene);
         console.log('[shadow] captured', JSON.stringify({ entry: scene.entry, openSide: scene.openSide, puppetBox: scene.puppetBox, bodyBox: scene.bodyBox, neck: scene.neck }));
         maskToPng(scene.puppet, scene.puppetBox, SNAP_PAD).then((png) => {
@@ -310,6 +317,7 @@ async function main() {
     const alive = creatures.filter((c) => !c.retiring);
     for (let i = 0; i < alive.length - MAX_CREATURES; i++) alive[i].retire();
     for (const c of creatures) c.update(dt);
+    sparkles.update(dt);
     for (let i = creatures.length - 1; i >= 0; i--) if (creatures[i].done) creatures.splice(i, 1);
 
     if (panel!.visible) {
@@ -322,6 +330,7 @@ async function main() {
     clearWhite(stage);
     for (const c of creatures) c.draw(stage.ctx);
     drawPen(stage.ctx, penState);
+    sparkles.draw(stage.ctx);
     if (debug) {
       const lines = [status, scene ? `shadow from ${scene.entry ?? 'nowhere'} → open ${scene.openSide}` : 'no shadow', `${creatures.length} creature(s)`, `last seen: ${lastRec}`, `ignoring ${darkPx} px`, calibInfo, shadowInfo, scene ? `shape: ${scene.pointing ? 'one finger (pen) ✎' : whyIgnored ?? 'usable ✓'}` : '', `pen: ${penState.mode}`];
       if (recorder.recording) lines.push('● REC');

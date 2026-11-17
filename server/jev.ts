@@ -99,7 +99,10 @@ const DOODLE_MOTIONS = {
   hop: 'It would hop or bounce: rabbit, frog, kangaroo, ball, heart, star.',
   walk: 'It would walk: dog, cat, horse, person, any animal with legs, a house on legs.',
   sway: 'It stays and sways: flower, tree, plant, grass.',
-  float: 'It would float or drift: sun, cloud, balloon, face, a shape or scribble, anything else.',
+  float: 'It would float or drift: cloud, balloon, face, a shape or scribble, anything else.',
+  beat: 'It beats or pulses: heart.',
+  twinkle: 'It twinkles or sparkles: star, diamond, a sparkle.',
+  spin: 'It turns slowly: sun, wheel, spiral, flower head.',
 };
 export type DoodleRecognition = { what: string; motion: keyof typeof DOODLE_MOTIONS; confidence: number; note?: string };
 

@@ -198,12 +198,12 @@ export function sceneLit(lit: Mask, ignored: Mask): Mask {
 function pointingFinger(pixels: Int32Array, dist: Int32Array, far: number, W: number, wallSize: number): { pointing: boolean; tip: Pt; tipDir: Pt } {
   const fingerW = Math.max(3, wallSize * 0.035), L = 2.5 * fingerW;
   const end: number[] = [];
-  let tipI = -1;
+  let tx = 0, ty = 0, tn = 0;
   for (const i of pixels) {
     if (dist[i] >= far - L) end.push(i);
-    if (dist[i] === far && tipI < 0) tipI = i;
+    if (dist[i] >= far - 1) { tx += i % W; ty += (i / W) | 0; tn++; } // the very end of the finger, averaged: a steadier point
   }
-  const tip = { x: (tipI % W) + 0.5, y: ((tipI / W) | 0) + 0.5 };
+  const tip = { x: tx / Math.max(1, tn) + 0.5, y: ty / Math.max(1, tn) + 0.5 };
   // how many separate pieces is the end made of?
   const inEnd = new Set(end), seen = new Set<number>();
   let pieces = 0;

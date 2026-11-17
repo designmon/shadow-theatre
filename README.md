@@ -79,14 +79,15 @@ npm run server
 
 ## Draw with your fingertip
 
-Point **one finger** into the light and hold it still for about a second: a red ring fills up,
-then a **red laser dot** appears just past your fingertip. Move your finger to draw. Pull your
-hand away (or hold still) to finish. The drawing is recognised — *what is it, and how would it
-move?* — and comes alive: wings flap, a fish ripples, a flower sways, anything else floats, hops
-or waddles. A drawn dog, rabbit, butterfly, swan or heart melts into the full animal.
+Put your hand in the light and **hold your fingertip still** for a moment: a golden ring
+gathers, sparkles burst, and your fingertip becomes a **glowing pen**. Draw; your line is
+smoothed as you go. **Pull your hand away** (or hold still) to finish: the line settles into
+its refined shape with a burst of sparkles, gets recognised (what is it, how would it move?)
+and comes alive right where you drew it — wings flap, a fish swims a little figure-eight,
+a heart beats, a star twinkles, a flower sways, the sun turns.
 
-Nothing leaves the wall: creatures and drawings keep exploring and settle, building up a living
-picture. Once there are more than 8, the oldest fades away.
+Drawings stay on the wall; once there are more than 8, the oldest fades away.
+(Shadow-puppet animals are switched off for now: `PUPPETS` in `src/main.ts`.)
 
 ## Try it without a projector
 
