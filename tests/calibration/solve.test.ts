@@ -108,3 +108,32 @@ describe('calibrationWarning', () => {
     expect(calibrationWarning(wall, wall)).toBeNull();
   });
 });
+
+describe('a lamp in one corner (real-room report: "only saw 4 of the 4 squares")', () => {
+  // the lamp-lit corner: projector adds little there (camera near its maximum)
+  const lampCorner = (g: Gray, add: number) => {
+    for (let y = 0; y < 240; y++) for (let x = 0; x < 320; x++) if (x > 170 && y > 120) g.data[y * 320 + x] = Math.min(255, g.data[y * 320 + x] + add);
+    return g;
+  };
+  it('accepts correct squares even when the lamp corner barely lights up in the white picture', () => {
+    const dark = lampCorner(render(30, 30), 190);
+    const pattern = lampCorner(render(30, 200, centers), 190);
+    const white = lampCorner(render(30, 200), 190);
+    const r = solveCalibration(dark, pattern, white, centers, PW, PH);
+    expect(r.method).toBe('squares');
+    expect(close(r.projToCam, 3)).toBe(true);
+  });
+  it('finds a faint square in the lamp corner', () => {
+    const dark = lampCorner(render(30, 30), 150);
+    const pattern = lampCorner(render(30, 200, centers), 150);
+    const white = lampCorner(render(30, 200), 150);
+    expect(solveCalibration(dark, pattern, white, centers, PW, PH).method).toBe('squares');
+  });
+});
+
+describe('honest failure messages', () => {
+  it('says the squares did not line up, not "saw 4 of 4"', async () => {
+    const { CalibrationError } = await import('../../src/calibration/calibrate');
+    expect(new CalibrationError(4, gray(1, 1), mask(1, 1)).message).not.toMatch(/4 of the 4/);
+  });
+});

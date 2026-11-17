@@ -14,7 +14,9 @@ export class CalibrationError extends Error {
   constructor(readonly seen: number, readonly lit: Gray, readonly changed: Mask) {
     super(seen === 0
       ? "can't see the projected squares at all — is the camera pointing at the projected picture?"
-      : `only saw ${seen} of the 4 squares — make sure the whole picture is in view and nothing blocks the light`);
+      : seen >= 4
+        ? "found the 4 squares, but they don't line up with the projected picture — check nothing else bright (a lamp, a window) is in the camera view"
+        : `only saw ${seen} of the 4 squares — make sure the whole picture is in view and nothing blocks the light`);
   }
 }
 
@@ -126,8 +128,13 @@ export function solveCalibration(dark: Gray, patternLit: Gray, white: Gray, cent
   const accept = (camToProj: H, method: 'squares' | 'picture') => ({ camToProj, projToCam: invertH(camToProj), method });
 
   if (markers.points) {
+    // Squares: the bright picture must fall inside where they say the wall is (a stray light
+    // taken for a square fails this), while a dim corner (lamp nearby) may stay unlit.
     const h = solveHomography(markers.points, centers);
-    if (agreement(h) >= MIN_AGREEMENT) return accept(h, 'squares');
+    const m = wallMask(h, projW, projH, W, Hh);
+    let inter = 0, pic = 0, wall = 0;
+    for (let i = 0; i < n; i++) { inter += m.data[i] & picture.data[i]; pic += picture.data[i]; wall += m.data[i]; }
+    if (pic && wall && inter / pic >= 0.85 && inter / wall >= 0.55) return accept(h, 'squares');
   }
   // corners of the bright picture: only if the whole picture is in view (cut-off corners aren't corners)
   const t = blob.touches;

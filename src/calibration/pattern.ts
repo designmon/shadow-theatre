@@ -43,13 +43,25 @@ export function findMarkers(lit: Gray, dark: Gray): Pt[] | null {
 }
 
 export function findMarkersDetailed(lit: Gray, dark: Gray): MarkerResult {
+  // A square near a lamp brightens the picture much less: if the first cut finds fewer than 4,
+  // try a lower one. The size / one-per-quadrant checks below keep stray spots out.
+  let res: MarkerResult = { points: null, seen: 0, changed: { width: lit.width, height: lit.height, data: new Uint8Array(lit.width * lit.height) } };
+  for (const cut of [0.3, 0.15]) {
+    const r = findMarkersAt(lit, dark, cut);
+    if (r.points) return r;
+    if (r.seen >= res.seen) res = r;
+  }
+  return res;
+}
+
+function findMarkersAt(lit: Gray, dark: Gray, cut: number): MarkerResult {
   const { width: W, height: H } = lit;
   const changed: Mask = { width: W, height: H, data: new Uint8Array(W * H) };
   const diff = new Int16Array(W * H);
   let max = 0;
   for (let i = 0; i < diff.length; i++) { diff[i] = lit.data[i] - dark.data[i]; if (diff[i] > max) max = diff[i]; }
   if (max < MIN_DIFF) return { points: null, seen: 0, changed };
-  for (let i = 0; i < diff.length; i++) changed.data[i] = diff[i] > max * 0.5 ? 1 : 0;
+  for (let i = 0; i < diff.length; i++) changed.data[i] = diff[i] > Math.max(MIN_DIFF, max * cut) ? 1 : 0;
   const blobs = findBlobs(changed, 6).slice(0, 8);
   const cands = blobs.map((b) => {
     let sx = 0, sy = 0;
