@@ -65,19 +65,30 @@ export async function runCalibration(stage: Stage, video: HTMLVideoElement, keep
   stage.ctx.fillRect(0, 0, w, h);
   await settle(video);
   const dark = await grabAveraged(video);
-  const centers = drawCalibrationPattern(stage.ctx, w, h);
-  let cam = null, lit: Gray = dark, result = null;
-  for (const ms of PATTERN_WAITS_MS) {
+  // First with the squares near the corners; if that doesn't add up (part of the picture is outside
+  // the camera view, low contrast), again with the squares further inside the picture.
+  let solved: ReturnType<typeof solveCalibration> | null = null;
+  let whiteRef: Gray = dark;
+  let lastErr: unknown = null;
+  for (const [inset, ms] of [[0.12, PATTERN_WAITS_MS[0]], [0.28, PATTERN_WAITS_MS[1]]] as const) {
+    const centers = drawCalibrationPattern(stage.ctx, w, h, inset);
     await wait(ms);
-    lit = await grabAveraged(video);
-    result = findMarkersDetailed(lit, dark);
-    if ((cam = result.points)) break;
+    const lit = await grabAveraged(video);
+    clearWhite(stage);
+    await settle(video);
+    whiteRef = await grabAveraged(video);
+    try {
+      solved = solveCalibration(dark, lit, whiteRef, centers, w, h);
+      break;
+    } catch (err) {
+      lastErr = err;
+      stage.ctx.setTransform(1, 0, 0, 1, 0, 0);
+      stage.ctx.fillStyle = '#000';
+      stage.ctx.fillRect(0, 0, w, h);
+      await wait(400);
+    }
   }
-  void cam;
-  clearWhite(stage);
-  await settle(video);
-  const whiteRef = await grabAveraged(video);
-  const solved = solveCalibration(dark, lit, whiteRef, centers, w, h); // throws CalibrationError if it doesn't add up
+  if (!solved) throw lastErr;
   console.log('[shadow] calibrated using', solved.method);
   if (keep) return { ...keep, camToProj: solved.camToProj, projToCam: solved.projToCam, method: solved.method };
   return { camToProj: solved.camToProj, projToCam: solved.projToCam, whiteRef, dark, method: solved.method };
@@ -118,7 +129,10 @@ export function solveCalibration(dark: Gray, patternLit: Gray, white: Gray, cent
     const h = solveHomography(markers.points, centers);
     if (agreement(h) >= MIN_AGREEMENT) return accept(h, 'squares');
   }
-  // corners of the bright picture: extremes along the diagonals
+  // corners of the bright picture: only if the whole picture is in view (cut-off corners aren't corners)
+  const t = blob.touches;
+  if (t.left + t.right + t.up + t.down > 0) throw new CalibrationError(markers.seen, patternLit, markers.changed);
+  // extremes along the diagonals
   let tl = 0, tr = 0, br = 0, bl = 0, vtl = Infinity, vtr = -Infinity, vbr = -Infinity, vbl = Infinity;
   for (const i of blob.pixels) {
     const x = i % W, y = (i / W) | 0;
@@ -132,4 +146,12 @@ export function solveCalibration(dark: Gray, patternLit: Gray, white: Gray, cent
   const h = solveHomography(cam, [{ x: 0, y: 0 }, { x: projW, y: 0 }, { x: projW, y: projH }, { x: 0, y: projH }]);
   if (agreement(h) >= MIN_AGREEMENT) return accept(h, 'picture');
   throw new CalibrationError(markers.seen, patternLit, markers.changed);
+}
+
+/** After calibration: was part of the wall dark in the white picture (someone standing in the light)? */
+export function calibrationWarning(wall: Mask, lit: Mask): string | null {
+  let w = 0, both = 0;
+  for (let i = 0; i < wall.data.length; i++) if (wall.data[i]) { w++; both += lit.data[i]; }
+  if (!w) return null;
+  return both / w < 0.9 ? 'part of the wall was blocked while calibrating — step out of the light and press C' : null;
 }

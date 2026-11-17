@@ -32,15 +32,17 @@ export function installSimCamera(stage: () => HTMLCanvasElement): void {
     ctx.fillRect(0, 0, 640, 480);
     // the wall: stage filmed with a mild skew (camera off to the side)
     ctx.save();
-    ctx.setTransform(0.85, 0.03, -0.02, 0.88, 40, 25);
+    // ?crop: the camera misses the left part of the picture
+    ctx.setTransform(0.85, 0.03, -0.02, 0.88, params.has('crop') ? -110 : 40, 25);
     ctx.filter = 'brightness(0.85)';
     ctx.drawImage(stage(), 0, 0, 640, 480);
     ctx.restore();
     // ?cover: someone standing in front of the top-right of the wall the whole time
     if (params.has('cover')) { ctx.fillStyle = '#080808'; ctx.fillRect(470, 20, 170, 200); }
     // performer appears after calibration (~3 s), reaches in, holds, leaves
-    const cycle = (t - 3) % 9;
-    if (t > 3 && cycle < 6) {
+    const start = Number(params.get('start') ?? 3); // ?start=<s>: when the performer first walks in
+    const cycle = (t - start) % 9;
+    if (t > start && cycle < 6) {
       const reach = Math.min(1, cycle / 1.2) * (cycle > 5 ? Math.max(0, 6 - cycle) : 1);
       ctx.fillStyle = 'rgba(8,8,8,1)';
       ctx.fillRect(40, 140, 90, 360); // body against the left of the wall

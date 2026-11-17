@@ -4,18 +4,23 @@ import { findBlobs } from '../vision/blobs';
 const INSET = 0.12;
 const SIZE = 0.07; // half-size of each square, as a fraction of the picture height
 
+/** Centres of the four squares TL, TR, BR, BL (projector px), `inset` = fraction from the edges. */
+export function patternCenters(w: number, h: number, inset = INSET): Pt[] {
+  return [
+    { x: w * inset, y: h * inset }, { x: w * (1 - inset), y: h * inset },
+    { x: w * (1 - inset), y: h * (1 - inset) }, { x: w * inset, y: h * (1 - inset) },
+  ];
+}
+
 /** Black screen with four white squares; returns their centers TL, TR, BR, BL (projector px). */
-export function drawCalibrationPattern(ctx: CanvasRenderingContext2D, w: number, h: number): Pt[] {
+export function drawCalibrationPattern(ctx: CanvasRenderingContext2D, w: number, h: number, inset = INSET): Pt[] {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.filter = 'none';
   ctx.globalAlpha = 1;
   ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, w, h);
   const s = SIZE * h;
-  const centers = [
-    { x: w * INSET, y: h * INSET }, { x: w * (1 - INSET), y: h * INSET },
-    { x: w * (1 - INSET), y: h * (1 - INSET) }, { x: w * INSET, y: h * (1 - INSET) },
-  ];
+  const centers = patternCenters(w, h, inset);
   ctx.fillStyle = '#fff';
   for (const c of centers) ctx.fillRect(c.x - s, c.y - s, 2 * s, 2 * s);
   return centers;

@@ -1,4 +1,4 @@
-import { CalibrationError, runCalibration, type Calibration } from './calibration/calibrate';
+import { CalibrationError, calibrationWarning, runCalibration, type Calibration } from './calibration/calibrate';
 import { alignmentScore } from './calibration/alignment';
 import { wallMask, warpMask } from './calibration/homography';
 import { debounce, MisalignmentWatch } from './calibration/watch';
@@ -151,6 +151,7 @@ async function main() {
       // only the projected picture counts as wall: never the room around it
       const wall = wallMask(calib.camToProj, stage.size().w, stage.size().h, calib.whiteRef.width, calib.whiteRef.height);
       lit = litMask(calib.whiteRef, calib.dark);
+      const blocked = calibrationWarning(wall, lit);
       const litBefore = countOnes(lit);
       for (let i = 0; i < lit.data.length; i++) lit.data[i] &= wall.data[i];
       // diagnostics for the debug view: what the calibration thinks the wall is
@@ -159,6 +160,7 @@ async function main() {
       console.log('[shadow] calibration', calibInfo);
       status = auto ? 're-aligned' : 'calibrated';
       checklist.wall('ok', auto ? 're-aligned after the projector moved' : calib.method === 'picture' ? 'projector found — from the bright picture' : 'projector found — 4 squares seen', performance.now());
+      if (blocked && !auto) { checklist.wall('fail', blocked, performance.now()); status = blocked; }
       hold.reset();
     } catch (err) {
       status = auto ? 'projector moved? step out of the beam and press C' : String((err as Error).message ?? err);

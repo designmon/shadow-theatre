@@ -44,3 +44,67 @@ describe('solveCalibration', () => {
     expect(() => solveCalibration(render(30, 30), lit, render(30, 32), centers, PW, PH)).toThrow();
   });
 });
+
+import { patternCenters } from '../../src/calibration/pattern';
+describe('picture edges outside the camera view', () => {
+  it('pattern squares can sit further inside the picture', () => {
+    const c = patternCenters(1000, 600, 0.28)[0];
+    expect(c.x).toBeCloseTo(280);
+    expect(c.y).toBeCloseTo(168);
+  });
+
+  it('calibrates from inner squares when the left part of the picture is cut off', () => {
+    // camera sees the picture shifted left: its left ~20% falls outside the frame
+    const quad = [{ x: -50, y: 40 }, { x: 250, y: 50 }, { x: 240, y: 200 }, { x: -40, y: 190 }];
+    const c2p = solveHomography(quad, projCorners), p2c = solveHomography(projCorners, quad);
+    const draw = (room: number, wall: number, squares: Pt[] = []) => {
+      const g = gray(320, 240, room);
+      for (let y = 0; y < 240; y++) for (let x = 0; x < 320; x++) {
+        const p = applyH(c2p, { x: x + 0.5, y: y + 0.5 });
+        if (p.x < 0 || p.y < 0 || p.x >= PW || p.y >= PH) continue;
+        const on = squares.some((c) => Math.abs(p.x - c.x) <= 40 && Math.abs(p.y - c.y) <= 40);
+        g.data[y * 320 + x] = squares.length ? (on ? wall : room) : wall;
+      }
+      return g;
+    };
+    const inner = patternCenters(PW, PH, 0.28);
+    const r = solveCalibration(draw(30, 30), draw(30, 200, inner), draw(30, 200), inner, PW, PH);
+    expect(r.method).toBe('squares');
+    projCorners.forEach((p, i) => {
+      const q = applyH(r.projToCam, p);
+      expect(Math.hypot(q.x - applyH(p2c, p).x, q.y - applyH(p2c, p).y)).toBeLessThan(4);
+      void quad[i];
+    });
+  });
+});
+
+describe('never trust picture corners that are cut off by the camera frame', () => {
+  it('refuses (so the inner squares get a try) when the picture runs off the camera view', () => {
+    const quad = [{ x: -50, y: 40 }, { x: 250, y: 50 }, { x: 240, y: 200 }, { x: -40, y: 190 }];
+    const c2p = solveHomography(quad, projCorners);
+    const draw = (room: number, wall: number) => {
+      const g = gray(320, 240, room);
+      for (let y = 0; y < 240; y++) for (let x = 0; x < 320; x++) {
+        const p = applyH(c2p, { x: x + 0.5, y: y + 0.5 });
+        if (p.x >= 0 && p.y >= 0 && p.x < PW && p.y < PH) g.data[y * 320 + x] = wall;
+      }
+      return g;
+    };
+    // outer squares: the left two are outside the camera view, so no squares solution either
+    expect(() => solveCalibration(draw(30, 30), draw(30, 30), draw(30, 200), centers, PW, PH)).toThrow();
+  });
+});
+
+import { calibrationWarning } from '../../src/calibration/calibrate';
+import { fillRect, mask } from '../helpers';
+describe('calibrationWarning', () => {
+  it('warns when part of the wall was dark during calibration (someone in the light)', () => {
+    const wall = fillRect(mask(320, 240), 50, 40, 200, 150, 1);
+    const lit = fillRect(fillRect(mask(320, 240), 50, 40, 200, 150, 1), 60, 60, 50, 120, 0);
+    expect(calibrationWarning(wall, lit)).toMatch(/step out/i);
+  });
+  it('is quiet when the whole wall lit up', () => {
+    const wall = fillRect(mask(320, 240), 50, 40, 200, 150, 1);
+    expect(calibrationWarning(wall, wall)).toBeNull();
+  });
+});
