@@ -16,7 +16,7 @@ import { HoldDetector } from './vision/hold';
 import { projectBox, projectMask } from './vision/project';
 import { analyzeScene, isUsablePuppet, sceneLit, usableReason, type Scene } from './vision/scene';
 import { setBlur } from './creatures/style';
-import { buildExpected, dilate, erode, keepInside, litMask, shadowMask, smoothMask } from './vision/shadowMask';
+import { buildExpected, dilate, erode, keepInside, litMask, shadowMask, smoothMask, wallInterior } from './vision/shadowMask';
 import { installSimCamera } from './sim';
 import { recognize } from './recognize/client';
 import { maskToPng, snapshotRegion } from './vision/snapshot';
@@ -154,6 +154,7 @@ async function main() {
       const blocked = calibrationWarning(wall, lit, calib.whiteRef);
       const litBefore = countOnes(lit);
       for (let i = 0; i < lit.data.length; i++) lit.data[i] &= wall.data[i];
+      lit = wallInterior(lit, 3); // the border between picture and bare wall is not a shadow
       // diagnostics for the debug view: what the calibration thinks the wall is
       const n = lit.data.length, med = (g: Gray) => { const v: number[] = []; for (let i = 0; i < n; i += 5) if (lit!.data[i]) v.push(g.data[i]); v.sort((a, b) => a - b); return v.length ? v[v.length >> 1] : 0; };
       calibInfo = `wall ${Math.round((100 * countOnes(wall)) / n)}% of view · lit ${Math.round((100 * litBefore) / n)}% → ${Math.round((100 * countOnes(lit)) / n)}% · white ${med(calib.whiteRef)} / black ${med(calib.dark)}`;

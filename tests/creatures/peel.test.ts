@@ -141,3 +141,17 @@ describe('unrecognised shapes travel with their own shape', () => {
     expect(p.done).toBe(true);
   });
 });
+
+describe('a morph you can follow (real-room report: the morph was unclear, it left at once)', () => {
+  it('holds the hand shape, morphs, and the animal only starts moving after the morph', () => {
+    const p = new PeelOff(shape(), spawn);
+    run(p, 600);
+    p.resolve({ kind: 'rabbit', confidence: 0.9, facing: 'right', anchor: { x: 0.5, y: 0.3 } });
+    p.update(20);
+    const start = (p as any).creature.headBoxWorld();
+    run(p, 1400); // hold + morph
+    const after = (p as any).creature.headBoxWorld();
+    expect(Math.hypot(after.x - start.x, after.y - start.y)).toBeLessThan(5); // has not hopped away yet
+    expect(p.kind).toBe('rabbit');
+  });
+});

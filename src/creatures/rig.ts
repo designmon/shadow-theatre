@@ -20,6 +20,8 @@ export type CreatureDef = {
   flips: boolean;
   /** Extra offset in rig units (hops, bobs) at time t (ms). */
   bob?: (t: number) => Pt;
+  /** Random stops across the wall before leaving (dog, rabbit: they explore). Default 0. */
+  wander?: number;
   /** Forward-speed multiplier over time (a rabbit only travels while in the air). Default 1. */
   pace?: (t: number) => number;
   draw: (ctx: CanvasRenderingContext2D, t: number) => void;
@@ -50,9 +52,10 @@ export class RiggedCreature implements Creature {
     this.kind = def.kind;
     const a = spawn.anchorBox;
     this.scale = Math.max(a.w, a.h) / Math.max(def.headBox.w, def.headBox.h);
-    this.path = planPath(spawn, seed);
+    this.path = planPath(spawn, seed, { wander: def.wander ?? 0 });
     this.pathLen = this.path.slice(1).reduce((s, p, i) => s + Math.hypot(p.x - this.path[i].x, p.y - this.path[i].y), 0);
-    this.speed = Math.max(MIN_SPEED, (def.speed * Math.max(a.w, a.h)) / 1000);
+    // head-sizes per second, but never faster than crossing the wall in ~7 s (big hands made it race off)
+    this.speed = Math.max(MIN_SPEED, Math.min((def.speed * Math.max(a.w, a.h)) / 1000, spawn.wall.w / 7000));
     const dx = this.path[1].x - this.path[0].x;
     this.flip = def.flips && (Math.abs(dx) > 1 ? dx < 0 : spawn.facing === 'left');
   }

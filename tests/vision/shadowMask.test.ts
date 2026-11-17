@@ -145,3 +145,25 @@ describe('smoothMask (no blocky copies on the wall)', () => {
     expect(Math.abs(after - before) / before).toBeLessThan(0.08);
   });
 });
+
+describe('soft finger shadows (real-room report: the dog loses its fingers)', () => {
+  const white = gray(320, 240, 172), black = gray(320, 240, 131);
+  it('includes lighter finger shadows that are connected to the darker palm shadow', () => {
+    const f = fillRect(gray(320, 240, 172), 100, 100, 40, 30, 133); // palm: full shadow
+    fillRect(f, 140, 108, 30, 6, 160); // fingers: soft, light shadow (above the half-way level)
+    const m = shadowMask(f, buildExpected(white, mask(320, 240)), 0.45, black);
+    expect(bbox(m)).toEqual({ x: 100, y: 100, w: 70, h: 30 });
+  });
+  it('ignores the same light grey when it is not connected to a real shadow', () => {
+    const f = fillRect(gray(320, 240, 172), 200, 50, 30, 6, 160);
+    expect(count(shadowMask(f, buildExpected(white, mask(320, 240)), 0.45, black))).toBe(0);
+  });
+});
+
+describe('edge of the projected picture (real-room report: the border is taken for a shape)', () => {
+  it('wallInterior keeps a margin away from the picture edge', async () => {
+    const { wallInterior } = await import('../../src/vision/shadowMask');
+    const lit = fillRect(mask(100, 100), 10, 10, 80, 60, 1);
+    expect(bbox(wallInterior(lit, 3))).toEqual({ x: 13, y: 13, w: 74, h: 54 });
+  });
+});

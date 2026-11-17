@@ -68,3 +68,19 @@ describe('planPath with little room ahead', () => {
     expect(end.y).toBeGreaterThan(wall.h);
   });
 });
+
+describe('wandering before leaving (real-room report: the rabbit jumps off at once)', () => {
+  it('meanders over the free part of the wall before it exits', () => {
+    const s: Spawn = { anchorBox: { x: 700, y: 400, w: 120, h: 100 }, facing: 'right', openSide: 'right', wall, avoid: { x: 0, y: 300, w: 500, h: 780 } };
+    const p = planPath(s, 11, { wander: 4 });
+    let len = 0;
+    for (let i = 1; i < p.length; i++) len += Math.hypot(p[i].x - p[i - 1].x, p[i].y - p[i - 1].y);
+    expect(len).toBeGreaterThan(wall.w * 1.2);
+    for (const q of p.slice(1, -1)) {
+      expect(q.x).toBeGreaterThan(0); expect(q.x).toBeLessThan(wall.w);
+      expect(q.y).toBeGreaterThan(0); expect(q.y).toBeLessThan(wall.h);
+    }
+    const end = p.at(-1)!;
+    expect(end.x < 0 || end.x > wall.w || end.y < 0 || end.y > wall.h).toBe(true);
+  });
+});

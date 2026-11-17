@@ -12,7 +12,8 @@ export const WAIT_MS = 6500; // a bit longer than the recognition timeout
 const DRIFT_SPEED = 0.15; // px per ms: an unrecognised shape wanders off with its own outline
 const FADE_PX = 120; // fades only over the last stretch of its route
 const GAP = 8;
-const MORPH_MS = 750; // the shadow's outline melts into the animal's
+const HOLD_MS = 350; // the copied hand shape stays a moment, so you see it's yours
+const MORPH_MS = 1200; // then its outline melts slowly into the animal's
 const HANDOFF = 0.82; // after this much of the morph, the real drawing fades in
 
 type Phase = 'slide' | 'wait' | 'drift' | 'morph' | 'creature' | 'gone';
@@ -54,7 +55,7 @@ export class PeelOff implements Creature {
   /** How long it has been fully opaque (0 while fading/morphing) — for the alignment check. */
   get steadyMs(): number {
     if (this.phase === 'slide' || this.phase === 'wait') return this.t;
-    if (this.phase === 'creature') return this.t - (this.morphStart + MORPH_MS);
+    if (this.phase === 'creature') return this.t - (this.morphStart + HOLD_MS + MORPH_MS);
     return 0;
   }
 
@@ -78,8 +79,9 @@ export class PeelOff implements Creature {
     else if (this.phase === 'wait' && (this.resolution || this.t >= WAIT_MS)) this.startDrift();
     if (this.phase === 'drift') this.stepDrift(dtMs);
     if (this.phase === 'morph' || this.phase === 'creature') {
-      this.creature!.update(dtMs);
-      const k = Math.min(1, (this.t - this.morphStart) / MORPH_MS);
+      const k = this.morphK();
+      // the animal starts its routine (bark, crouch, hop) only once it has fully formed
+      if (this.phase === 'creature' || k >= 1) this.creature!.update(dtMs);
       if (this.morphTo) {
         // outline morph: the copied shadow itself is replaced by the morphing outline
         const h = Math.max(0, (k - HANDOFF) / (1 - HANDOFF));
@@ -91,6 +93,10 @@ export class PeelOff implements Creature {
       }
       if (k >= 1) this.phase = 'creature';
     }
+  }
+
+  private morphK(): number {
+    return Math.min(1, Math.max(0, (this.t - this.morphStart - HOLD_MS) / MORPH_MS));
   }
 
   /** The creature takes over: its head lands where the recognized head is, on the slid silhouette. */
@@ -173,7 +179,7 @@ export class PeelOff implements Creature {
   draw(ctx: CanvasRenderingContext2D): void {
     if (this.phase === 'gone') return;
     if (this.phase === 'morph' && this.morphFrom && this.morphTo) {
-      const k = Math.min(1, (this.t - this.morphStart) / MORPH_MS);
+      const k = this.morphK();
       const e = k * k * (3 - 2 * k);
       const pts = morphOutline(this.morphFrom, this.morphTo, e);
       ctx.save();

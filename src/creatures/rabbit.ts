@@ -30,6 +30,7 @@ export const rabbit: CreatureDef = {
   speed: 2.2,
   introMs: 500,
   flips: true,
+  wander: 3,
   // all the travel happens in the air
   pace: (t) => 3.2 * airborne((t / HOP_MS) % 1),
   bob: (t) => ({ x: 0, y: t > 500 ? -airborne(((t - 500) / HOP_MS) % 1) * 30 : 0 }),

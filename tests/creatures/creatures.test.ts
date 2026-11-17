@@ -51,3 +51,14 @@ describe('stage presence', () => {
     }
   });
 });
+
+describe('stays to be seen (real-room report: the rabbit was gone almost instantly)', () => {
+  it('a rabbit or dog stays on the wall for at least 6 s, whatever the hand size', () => {
+    for (const kind of ['rabbit', 'dog'] as const) {
+      const c = createCreature(kind, { ...spawn, anchorBox: { x: 900, y: 400, w: 300, h: 260 } });
+      let t = 0;
+      while (!c.done && t < 40000) { c.update(33); t += 33; }
+      expect(t).toBeGreaterThanOrEqual(6000);
+    }
+  });
+});

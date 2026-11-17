@@ -17,7 +17,8 @@ function inside(p: Pt, b: Box, pad: number) {
 }
 
 /** A wandering route from the anchor, out through the open side, off the wall. */
-export function planPath(spawn: Spawn, seed = Date.now()): Pt[] {
+/** `wander`: number of random stops across the free wall before heading off (so it can be enjoyed). */
+export function planPath(spawn: Spawn, seed = Date.now(), opts: { wander?: number } = {}): Pt[] {
   const rand = rng(seed);
   const { anchorBox: a, wall, avoid } = spawn;
   const d = DIRS[spawn.openSide];
@@ -40,6 +41,22 @@ export function planPath(spawn: Spawn, seed = Date.now()): Pt[] {
   const qDim = q.x !== 0 ? wall.w : wall.h;
   const margin = size * 0.6;
   const pts: Pt[] = [c, p1];
+  if (opts.wander) {
+    // meander: random stops in the free wall (not behind the performer), then leave from the last one
+    const m = size * 0.8;
+    let from = p1;
+    for (let i = 0; i < opts.wander; i++) {
+      let q = from;
+      for (let tries = 0; tries < 80; tries++) {
+        const cand = { x: m + rand() * (wall.w - 2 * m), y: m + rand() * (wall.h - 2 * m) };
+        const far = Math.hypot(cand.x - from.x, cand.y - from.y) > Math.max(wall.w, wall.h) * 0.3; // real hops across the wall
+        if (far && !(avoid && inside(cand, avoid, size))) { q = cand; break; }
+      }
+      pts.push(q);
+      from = q;
+    }
+    return [...pts, ...exitFrom(from, spawn, size, rand)];
+  }
   const n = 4;
   for (let i = 1; i <= n; i++) {
     const along = (total * i) / n;
@@ -69,4 +86,21 @@ export function pointAlong(path: Pt[], dist: number): Pt {
     left -= seg;
   }
   return path[path.length - 1];
+}
+
+/** A short route from `p` off the nearest wall edge that isn't behind the performer. */
+function exitFrom(p: Pt, spawn: Spawn, size: number, rand: () => number): Pt[] {
+  const { wall, avoid } = spawn;
+  const sides = [
+    { d: { x: 1, y: 0 }, dist: wall.w - p.x }, { d: { x: -1, y: 0 }, dist: p.x },
+    { d: { x: 0, y: 1 }, dist: wall.h - p.y }, { d: { x: 0, y: -1 }, dist: p.y },
+  ].filter((s) => {
+    if (!avoid) return true;
+    const ac = { x: avoid.x + avoid.w / 2, y: avoid.y + avoid.h / 2 };
+    return (ac.x - p.x) * s.d.x + (ac.y - p.y) * s.d.y <= 0; // not heading towards the performer
+  }).sort((a, b) => a.dist - b.dist);
+  const d = (sides[0] ?? { d: DIRS[spawn.openSide] }).d;
+  const out = Math.max(0, d.x > 0 ? wall.w - p.x : d.x < 0 ? p.x : d.y > 0 ? wall.h - p.y : p.y) + size * 1.5;
+  const wob = (rand() * 2 - 1) * size;
+  return [{ x: p.x + d.x * out * 0.5 - d.y * wob, y: p.y + d.y * out * 0.5 + d.x * wob }, { x: p.x + d.x * out, y: p.y + d.y * out }];
 }

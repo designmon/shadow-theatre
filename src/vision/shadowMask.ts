@@ -42,16 +42,33 @@ export function shadowMask(frame: Gray, expected: Gray | null, ratio = 0.45, bla
     if (black) {
       // A shadow is where the projector's light is missing: closer to the "projector off" level
       // than to the white wall. Works in a room that isn't fully dark (white 180 / black 136).
+      // 2 = firm shadow, 1 = soft (fingers further from the wall): kept only if connected to firm.
       const b = black.data[i];
       if (e - b < MIN_CONTRAST) continue;
-      out.data[i] = data[i] < gain * (b + SPLIT * (e - b)) ? 1 : 0;
+      out.data[i] = data[i] < gain * (b + SPLIT * (e - b)) ? 2 : data[i] < gain * (b + SOFT_SPLIT * (e - b)) ? 1 : 0;
     } else {
       out.data[i] = data[i] < ratio * gain * e ? 1 : 0;
     }
   }
+  if (black) growSoft(out);
   return out;
 }
 
+/** Keep soft shadow pixels (1) only where they connect to firm shadow (2); result is 0/1. */
+function growSoft(m: Mask): void {
+  const { width: W, height: H, data } = m;
+  const stack: number[] = [];
+  for (let i = 0; i < data.length; i++) if (data[i] === 2) stack.push(i);
+  while (stack.length) {
+    const i = stack.pop()!, x = i % W;
+    for (const j of [x > 0 ? i - 1 : -1, x < W - 1 ? i + 1 : -1, i - W, i + W]) {
+      if (j >= 0 && j < W * H && data[j] === 1) { data[j] = 2; stack.push(j); }
+    }
+  }
+  for (let i = 0; i < data.length; i++) data[i] = data[i] === 2 ? 1 : 0;
+}
+
+const SOFT_SPLIT = 0.75; // soft shadow: a quarter of the way down from the white wall
 const SPLIT = 0.5; // halfway between "projector off" and "projector on"
 const MIN_CONTRAST = 12; // the projector must brighten a pixel at least this much to judge it
 
@@ -146,4 +163,9 @@ export function smoothMask(m: Mask, r: number): Mask {
   const data = new Uint8Array(W * H);
   for (let i = 0; i < data.length; i++) data[i] = a[i] >= 0.5 ? 1 : 0;
   return { width: W, height: H, data };
+}
+
+/** The wall minus a margin along its edges: the border between picture and bare wall is no shadow. */
+export function wallInterior(lit: Mask, margin = 3): Mask {
+  return erode(lit, margin);
 }

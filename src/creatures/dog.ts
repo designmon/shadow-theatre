@@ -13,6 +13,7 @@ export const dog: CreatureDef = {
   speed: 2.0,
   introMs: 900,
   flips: true,
+  wander: 3,
   bob: (t) => ({ x: 0, y: -Math.abs(Math.sin((t / STRIDE_MS) * Math.PI * 2)) * 2.5 }),
   draw(ctx, t) {
     const moving = t > 900;
