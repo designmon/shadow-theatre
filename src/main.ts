@@ -19,7 +19,7 @@ import { setBlur } from './creatures/style';
 import { buildExpected, dilate, erode, keepInside, litMask, shadowMask, smoothMask } from './vision/shadowMask';
 import { installSimCamera } from './sim';
 import { recognize } from './recognize/client';
-import { maskToPng } from './vision/snapshot';
+import { maskToPng, snapshotRegion } from './vision/snapshot';
 
 const stage = createStage();
 if (new URLSearchParams(location.search).has('sim')) installSimCamera(() => stage.canvas);
@@ -89,14 +89,12 @@ function showLastCapture(png: Blob, verdict: string): void {
   box.style.display = debug ? 'block' : 'none';
 }
 
-const SNAP_PAD = 12; // must match maskToPng's default pad
+const SNAP_PAD = 12; // same pad as maskToPng uses
 
 function spawnPeel(scene: Scene): PeelOff {
   const c = calib!;
   const pb = scene.puppetBox;
-  const snap = { x: Math.max(0, pb.x - SNAP_PAD), y: Math.max(0, pb.y - SNAP_PAD), w: 0, h: 0 };
-  snap.w = Math.min(scene.puppet.width, pb.x + pb.w + SNAP_PAD) - snap.x;
-  snap.h = Math.min(scene.puppet.height, pb.y + pb.h + SNAP_PAD) - snap.y;
+  const snap = snapshotRegion(pb, SNAP_PAD); // the square image sent for recognition (head position is relative to it)
   const raw = projectMask(scene.puppet, scene.puppetBox, c.camToProj, c.projToCam);
   // each camera pixel became a block of ~scale x scale on the wall: smooth those steps away
   const scale = raw.box.w / Math.max(1, scene.puppetBox.w);
@@ -223,7 +221,7 @@ async function main() {
       if (scene && usable && hold.push(scene.puppet, now)) {
         const peel = spawnPeel(scene);
         console.log('[shadow] captured', JSON.stringify({ entry: scene.entry, openSide: scene.openSide, puppetBox: scene.puppetBox, bodyBox: scene.bodyBox, neck: scene.neck }));
-        maskToPng(scene.puppet, scene.puppetBox).then((png) => {
+        maskToPng(scene.puppet, scene.puppetBox, SNAP_PAD).then((png) => {
           showLastCapture(png, 'asking Claude…');
           return recognize(png).then((rec) => {
             lastRec = `${rec.kind} (${rec.confidence.toFixed(2)})`;
