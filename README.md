@@ -40,9 +40,17 @@ fullscreen on the projector.
 1. Start both `npm run dev` and `npm run server`, open the page, press **F**.
    It re-calibrates by itself after going fullscreen (the wall flashes
    black → four squares → white). **Stay out of the beam while it does.**
-2. The **debug view starts on** (top-left of the wall: what the camera sees,
-   your shadow in red). Check the whole wall is in view and your shadow is red.
-   Press **D** to hide it for the real show.
+2. The **setup panel** on the wall shows four checks and a big camera view:
+   - **Camera**: pick which camera to use (an iPhone via Continuity Camera
+     works great: prop it next to the projector, pointing at the wall).
+     The choice is remembered.
+   - **Sees the wall**: ✓ once the camera found the projector's 4 squares.
+     ✕ means it can't see the projected picture: aim the camera at it, press **C**.
+   - **Recognition**: ✓ when `npm run server` is running and Claude accepts your key.
+   - **Your shadow**: ✓ once it sees your hand in the light (shown red in the camera view).
+
+   When all four are green the panel fades out. **S** brings it back,
+   **D** shows a small debug view instead.
 3. Stand at one side, reach in, make a shape and hold it still for about a second.
 4. Watch the server terminal: it prints each answer and how long it took,
    e.g. `dog (0.92) in 2140 ms`. If it's often over ~4 s, tell Claude — a

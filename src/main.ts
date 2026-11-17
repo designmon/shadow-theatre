@@ -2,7 +2,9 @@ import { runCalibration, type Calibration } from './calibration/calibrate';
 import { alignmentScore } from './calibration/alignment';
 import { warpMask } from './calibration/homography';
 import { debounce, MisalignmentWatch } from './calibration/watch';
-import { grabGray, startCamera } from './camera';
+import { grabGray, listCameras, saveCameraId, savedCameraId, startCamera } from './camera';
+import { Checklist, describeHealth, type Health } from './setup/checklist';
+import { SetupPanel } from './setup/panel';
 import { PeelOff } from './creatures/peel';
 import type { Creature } from './creatures/types';
 import { drawDebug } from './debug/overlay';
@@ -24,7 +26,7 @@ if (new URLSearchParams(location.search).has('sim')) installSimCamera(() => stag
 const recorder = new Recorder();
 const hold = new HoldDetector({ cooldownMs: 3000 });
 const creatures: Creature[] = [];
-let debug = true;
+let debug = false; // the setup panel covers first-run checks; D shows the small debug view
 let calib: Calibration | null = null;
 let lit: Mask | null = null;
 let calibrating = false;
@@ -34,6 +36,8 @@ const watch = new MisalignmentWatch();
 const STEADY_MS = 300; // only check creatures that have been fully opaque this long (camera/projector lag)
 let darkPx = 0;
 const countOnes = (m: Mask) => { let n = 0; for (const v of m.data) n += v; return n; };
+const checklist = new Checklist();
+let panel: SetupPanel | null = null;
 
 const DARK_SCALE = 0.25; // render creatures at quarter size to find what we actually darken
 let darkCanvas: OffscreenCanvas | null = null;
@@ -54,10 +58,17 @@ function projectedDarkInCamera(frame: Gray, withOverlay = true, steadyOnly = fal
   const rgba = dctx.getImageData(0, 0, dw, dh).data;
   const small: Mask = { width: dw, height: dh, data: new Uint8Array(dw * dh) };
   for (let i = 0; i < small.data.length; i++) small.data[i] = rgba[i * 4 + 3] > 128 ? 1 : 0;
-  if (debug && withOverlay) {
-    // the debug picture-in-picture is projected too: don't mistake it for a shadow
-    const ow = Math.ceil((w * 0.18 + 40) * DARK_SCALE), oh = Math.ceil((w * 0.18 * 0.75 + 140) * DARK_SCALE);
-    for (let y = 0; y < Math.min(dh, oh); y++) small.data.fill(1, y * dw, y * dw + Math.min(dw, ow));
+  if (withOverlay) {
+    // the debug picture-in-picture and the setup panel are projected too: don't mistake them for shadows
+    const rects = [];
+    if (debug) rects.push({ x: 0, y: 0, w: w * 0.18 + 40, h: w * 0.18 * 0.75 + 140 });
+    const pr = panel?.rect();
+    if (pr) rects.push({ x: pr.x - 20, y: pr.y - 20, w: pr.w + 40, h: pr.h + 40 });
+    for (const r of rects) {
+      const x0 = Math.max(0, Math.floor(r.x * DARK_SCALE)), x1 = Math.min(dw, Math.ceil((r.x + r.w) * DARK_SCALE));
+      const y0 = Math.max(0, Math.floor(r.y * DARK_SCALE)), y1 = Math.min(dh, Math.ceil((r.y + r.h) * DARK_SCALE));
+      for (let y = y0; y < y1; y++) small.data.fill(1, y * dw + x0, y * dw + Math.max(x0, x1));
+    }
   }
   const H = calib!.camToProj.map((v, i) => (i < 6 ? v * DARK_SCALE : v)); // camera px -> small px
   const cam = warpMask(small, H, frame.width, frame.height);
@@ -86,22 +97,53 @@ function spawnPeel(scene: Scene): PeelOff {
 }
 
 async function main() {
-  const { video, stream } = await startCamera();
+  let cam = await startCamera(savedCameraId());
+  let { video, stream } = cam;
+  panel = new SetupPanel(async (id) => {
+    stream.getTracks().forEach((t) => t.stop());
+    cam = await startCamera(id);
+    ({ video, stream } = cam);
+    saveCameraId(id);
+    checklist.camera('ok', cam.label, performance.now());
+    calibrate(); // a different camera sees the wall differently
+  });
+  checklist.camera('ok', cam.label);
+  panel.setCameras(await listCameras(), cam.label);
+
+  // is the recognition server up and does Claude accept the key?
+  const checkServer = async () => {
+    let h: Health | null = null;
+    try {
+      const res = await fetch('/api/health');
+      h = res.ok ? ((await res.json()) as Health) : null;
+    } catch { /* server down */ }
+    const [state, detail] = describeHealth(h);
+    checklist.server(state, detail, performance.now());
+    setTimeout(checkServer, state === 'ok' ? 30000 : 4000);
+  };
+  checkServer();
 
   const calibrate = async (auto = false) => {
     if (calibrating) return;
     calibrating = true;
+    const panelWasVisible = panel!.visible;
+    panel!.show(false); // the calibration pattern must not be covered
+    checklist.wall('pending', 'calibrating — stay out of the beam…');
     try {
       // automatic re-alignment: the performer is probably in the beam, so keep the reference frames
       calib = await runCalibration(stage, video, auto && calib ? calib : undefined);
       lit = litMask(calib.whiteRef, calib.dark);
       status = auto ? 're-aligned' : 'calibrated';
+      checklist.wall('ok', auto ? 're-aligned after the projector moved' : 'projector found — 4 squares seen', performance.now());
       hold.reset();
     } catch (err) {
       status = auto ? 'projector moved? step out of the beam and press C' : String((err as Error).message ?? err);
+      checklist.wall('fail', auto ? 'projector moved — step out of the beam, press C' : "can't see the projected squares — aim the camera at the whole picture, press C", performance.now());
       if (auto) watch.failed(performance.now());
+      if (!auto) panel!.show(true); // bring the help back on failure
     } finally {
       calibrating = false;
+      if (panelWasVisible && !panel!.visible && !checklist.ready) panel!.show(true);
     }
   };
   // fullscreen / window changes alter the stage size: the old mapping is stale
@@ -115,6 +157,7 @@ async function main() {
     if (k === 'd') debug = !debug;
     if (k === 'r') recorder.toggle(stream);
     if (k === 'c') calibrate();
+    if (k === 's') panel!.show(!panel!.visible);
   });
   setTimeout(calibrate, 800);
 
@@ -141,6 +184,7 @@ async function main() {
       const score = steady && countOnes(steady) >= 1000 ? alignmentScore(frame, calib.whiteRef, steady) : null;
       if (watch.push(score, now)) { status = 'projector moved — re-aligning'; calibrate(true); return; }
       scene = analyzeScene(mask, findBlobs(mask), lit ?? undefined);
+      if (scene) checklist.shadow('ok', 'seen — make a shape and hold it still', now);
       const usable = scene && lit && isUsablePuppet(scene, own ?? { width: frame.width, height: frame.height, data: new Uint8Array(frame.data.length) }, lit);
       if (scene && usable && hold.push(scene.puppet, now)) {
         const peel = spawnPeel(scene);
@@ -160,6 +204,13 @@ async function main() {
     }
     for (const c of creatures) c.update(dt);
     for (let i = creatures.length - 1; i >= 0; i--) if (creatures[i].done) creatures.splice(i, 1);
+
+    if (panel!.visible) {
+      panel!.render(checklist);
+      // until calibrated it can't tell wall from room, so show the plain camera picture
+      panel!.drawCamera(frame, calib ? mask : { width: frame.width, height: frame.height, data: new Uint8Array(frame.data.length) });
+      if (checklist.shouldAutoHide(now)) panel!.show(false);
+    }
 
     clearWhite(stage);
     for (const c of creatures) c.draw(stage.ctx);

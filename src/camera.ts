@@ -1,16 +1,35 @@
 import type { Gray } from './types';
 
-export async function startCamera(): Promise<{ video: HTMLVideoElement; stream: MediaStream }> {
-  const stream = await navigator.mediaDevices.getUserMedia({
-    video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
-    audio: false,
-  });
+const CAMERA_KEY = 'shadow-theatre:camera';
+
+/** The camera picked last time (remembered in this browser), if any. */
+export function savedCameraId(): string | null {
+  try { return localStorage.getItem(CAMERA_KEY); } catch { return null; }
+}
+export function saveCameraId(id: string): void {
+  try { localStorage.setItem(CAMERA_KEY, id); } catch { /* private mode: just don't remember */ }
+}
+
+/** Video inputs with readable names (names are only available after camera permission). */
+export async function listCameras(): Promise<MediaDeviceInfo[]> {
+  return (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput');
+}
+
+export async function startCamera(deviceId?: string | null): Promise<{ video: HTMLVideoElement; stream: MediaStream; label: string }> {
+  const base = { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } };
+  let stream: MediaStream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: deviceId ? { ...base, deviceId: { exact: deviceId } } : base, audio: false });
+  } catch (err) {
+    if (!deviceId) throw err;
+    stream = await navigator.mediaDevices.getUserMedia({ video: base, audio: false }); // remembered camera is gone
+  }
   const video = document.createElement('video');
   video.playsInline = true;
   video.muted = true;
   video.srcObject = stream;
   await video.play();
-  return { video, stream };
+  return { video, stream, label: stream.getVideoTracks()[0]?.label || 'camera' };
 }
 
 let scratch: OffscreenCanvas | null = null;

@@ -8,10 +8,26 @@
       html, body { margin: 0; height: 100%; background: #fff; overflow: hidden; cursor: none; }
       #stage { display: block; width: 100vw; height: 100vh; }
       #hint { position: fixed; bottom: 12px; left: 12px; font: 13px system-ui, sans-serif; color: #999; cursor: default; }
+      #setup { position: fixed; top: 24px; left: 24px; width: min(560px, 44vw); max-height: calc(100vh - 48px); overflow: auto;
+        background: #fff; color: #111; border: 2px solid #111; border-radius: 14px; padding: 18px 20px 14px;
+        font: 16px/1.35 system-ui, sans-serif; cursor: default; box-sizing: border-box; }
+      #setup h1 { font-size: 20px; margin: 0 0 10px; }
+      #setup ul { list-style: none; margin: 0 0 12px; padding: 0; }
+      #setup li { display: grid; grid-template-columns: 26px 120px 1fr; gap: 6px; align-items: baseline; padding: 5px 0; border-bottom: 1px solid #eee; }
+      #setup li b { font-size: 18px; }
+      #setup li.ok b { color: #138a36; }
+      #setup li.fail b { color: #c62828; }
+      #setup li.pending b { color: #b8860b; }
+      #setup .label { font-weight: 600; }
+      #setup .detail { color: #444; overflow-wrap: anywhere; }
+      #setup .cam { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; font-weight: 600; }
+      #setup select { font: inherit; flex: 1; min-width: 0; }
+      #setup canvas { width: 100%; border-radius: 8px; background: #000; display: block; }
+      #setup .keys { margin: 8px 0 0; color: #777; font-size: 13px; }
     </style>
   </head>
   <body>
-    <div id="hint">F fullscreen · C calibrate · D debug · R record clip</div>
+    <div id="hint">F fullscreen · C calibrate · S setup · D debug · R record clip</div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
