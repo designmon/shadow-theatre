@@ -104,3 +104,14 @@ export function isUsablePuppet(scene: Scene, ownDarkCam: Mask, lit: Mask): boole
   }
   return true;
 }
+
+/**
+ * The wall as far as scene analysis is concerned: lit, and not hidden by
+ * something we project ourselves (setup card, debug view, creatures). A shadow
+ * running under one of those counts as entering from there.
+ */
+export function sceneLit(lit: Mask, ignored: Mask): Mask {
+  const data = new Uint8Array(lit.data.length);
+  for (let i = 0; i < data.length; i++) data[i] = lit.data[i] && !ignored.data[i] ? 1 : 0;
+  return { width: lit.width, height: lit.height, data };
+}

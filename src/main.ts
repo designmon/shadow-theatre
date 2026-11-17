@@ -14,7 +14,7 @@ import type { Gray, Mask } from './types';
 import { findBlobs } from './vision/blobs';
 import { HoldDetector } from './vision/hold';
 import { projectBox, projectMask } from './vision/project';
-import { analyzeScene, isUsablePuppet, type Scene } from './vision/scene';
+import { analyzeScene, isUsablePuppet, sceneLit, type Scene } from './vision/scene';
 import { setBlur } from './creatures/style';
 import { buildExpected, dilate, erode, litMask, shadowMask } from './vision/shadowMask';
 import { installSimCamera } from './sim';
@@ -73,6 +73,17 @@ function projectedDarkInCamera(frame: Gray, withOverlay = true, steadyOnly = fal
   const H = calib!.camToProj.map((v, i) => (i < 6 ? v * DARK_SCALE : v)); // camera px -> small px
   const cam = warpMask(small, H, frame.width, frame.height);
   return withOverlay ? dilate(cam, 2) : cam; // dilate for masking (blur halo), exact for the alignment check
+}
+
+let lastCapUrl: string | null = null;
+/** Debug: the last cut-out sent to Claude and its answer (bottom-right, with D). */
+function showLastCapture(png: Blob, verdict: string): void {
+  if (lastCapUrl) URL.revokeObjectURL(lastCapUrl);
+  lastCapUrl = URL.createObjectURL(png);
+  const box = document.getElementById('lastcap')!;
+  box.querySelector('img')!.src = lastCapUrl;
+  box.querySelector('b')!.textContent = verdict;
+  box.style.display = debug ? 'block' : 'none';
 }
 
 const SNAP_PAD = 12; // must match maskToPng's default pad
@@ -157,7 +168,7 @@ async function main() {
   window.addEventListener('keydown', (e) => {
     const k = e.key.toLowerCase();
     if (k === 'f') document.documentElement.requestFullscreen?.();
-    if (k === 'd') debug = !debug;
+    if (k === 'd') { debug = !debug; document.getElementById('lastcap')!.style.display = debug && lastCapUrl ? 'block' : 'none'; }
     if (k === 'r') recorder.toggle(stream);
     if (k === 'c') calibrate();
     if (k === 's') panel!.show(!panel!.visible);
@@ -188,14 +199,20 @@ async function main() {
       const steady = creatures.length ? erode(projectedDarkInCamera(frame, false, true), 2) : null;
       const score = steady && countOnes(steady) >= 1000 ? alignmentScore(frame, calib.whiteRef, steady) : null;
       if (watch.push(score, now)) { status = 'projector moved — re-aligning'; calibrate(true); return; }
-      scene = analyzeScene(mask, findBlobs(mask), lit ?? undefined);
+      scene = analyzeScene(mask, findBlobs(mask), lit ? sceneLit(lit, dark) : undefined);
       if (scene) checklist.shadow('ok', 'seen — make a shape and hold it still', now);
       const usable = scene && lit && isUsablePuppet(scene, own ?? { width: frame.width, height: frame.height, data: new Uint8Array(frame.data.length) }, lit);
       if (scene && usable && hold.push(scene.puppet, now)) {
         const peel = spawnPeel(scene);
-        maskToPng(scene.puppet, scene.puppetBox).then(recognize).then((rec) => {
-          lastRec = `${rec.kind} (${rec.confidence.toFixed(2)})`;
-          peel.resolve(rec);
+        console.log('[shadow] captured', JSON.stringify({ entry: scene.entry, openSide: scene.openSide, puppetBox: scene.puppetBox, bodyBox: scene.bodyBox, neck: scene.neck }));
+        maskToPng(scene.puppet, scene.puppetBox).then((png) => {
+          showLastCapture(png, 'asking Claude…');
+          return recognize(png).then((rec) => {
+            lastRec = `${rec.kind} (${rec.confidence.toFixed(2)})`;
+            showLastCapture(png, `→ ${lastRec}`);
+            console.log('[shadow] sent shape, Claude said', rec);
+            peel.resolve(rec);
+          });
         });
       }
       if (!scene) hold.reset();
@@ -222,7 +239,7 @@ async function main() {
     if (debug) {
       const lines = [status, scene ? `shadow from ${scene.entry ?? 'nowhere'} → open ${scene.openSide}` : 'no shadow', `${creatures.length} creature(s)`, `last seen: ${lastRec}`, `ignoring ${darkPx} px`];
       if (recorder.recording) lines.push('● REC');
-      drawDebug(stage.ctx, { frame, mask, fps, lines });
+      drawDebug(stage.ctx, { frame, mask, fps, lines, puppetBox: scene?.puppetBox ?? null });
     }
   };
   requestAnimationFrame(tick);

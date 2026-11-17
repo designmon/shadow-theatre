@@ -6,7 +6,7 @@ let tmp: OffscreenCanvas | null = null;
 /** Picture-in-picture of the camera (gray) with the shadow mask in red, top-left, 25% wide. */
 export function drawDebug(
   ctx: CanvasRenderingContext2D,
-  info: { frame: Gray; mask: Mask; fps: number; lines?: string[] },
+  info: { frame: Gray; mask: Mask; fps: number; lines?: string[]; puppetBox?: { x: number; y: number; w: number; h: number } | null },
 ): void {
   const { frame, mask } = info;
   if (!img || img.width !== frame.width || img.height !== frame.height) {
@@ -31,6 +31,13 @@ export function drawDebug(
   ctx.strokeStyle = '#f00';
   ctx.lineWidth = 2;
   ctx.strokeRect(16, 16, w, h);
+  if (info.puppetBox) {
+    // the part of the shadow it treats as the puppet (what gets sent to Claude)
+    const s = w / frame.width, b = info.puppetBox;
+    ctx.strokeStyle = '#0a0';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(16 + b.x * s, 16 + b.y * s, b.w * s, b.h * s);
+  }
   ctx.fillStyle = '#c00';
   ctx.font = `${Math.round(14 * devicePixelRatio)}px system-ui, sans-serif`;
   const lines = [`${info.fps.toFixed(0)} fps`, ...(info.lines ?? [])];

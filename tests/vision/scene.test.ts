@@ -122,3 +122,17 @@ describe('review I2: standing still is not a puppet', () => {
     expect(isUsablePuppet(s, mask(W, H), lit)).toBe(true);
   });
 });
+
+import { sceneLit } from '../../src/vision/scene';
+describe('shadows cut by an ignored area (setup card, debug view)', () => {
+  it('a hand whose arm disappears under the card still enters from that side', () => {
+    const lit = fillRect(mask(W, H), 20, 20, 280, 200, 1);
+    const ignored = fillRect(mask(W, H), 20, 20, 100, 200, 1); // card over the left of the wall
+    const m = mask(W, H);
+    fillRect(m, 120, 110, 70, 12, 1); // arm coming out from right at the edge of the card
+    fillRect(m, 185, 95, 30, 30, 1);  // hand
+    const s = analyzeScene(m, findBlobs(m), sceneLit(lit, ignored))!;
+    expect(s.entry).toBe('left');
+    expect(s.openSide).toBe('right');
+  });
+});

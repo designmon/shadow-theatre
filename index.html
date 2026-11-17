@@ -24,10 +24,14 @@
       #setup select { font: inherit; flex: 1; min-width: 0; }
       #setup canvas { width: 100%; border-radius: 8px; background: #000; display: block; }
       #setup .diag p { margin: 12px 0 6px; color: #c62828; }
+      #lastcap { position: fixed; right: 16px; bottom: 36px; width: 200px; background: #fff; border: 2px solid #c00;
+        font: 14px system-ui, sans-serif; color: #c00; padding: 6px; display: none; }
+      #lastcap img { width: 100%; display: block; image-rendering: pixelated; border: 1px solid #ddd; }
       #setup .keys { margin: 8px 0 0; color: #777; font-size: 13px; }
     </style>
   </head>
   <body>
+    <div id="lastcap"><div>last shape sent to Claude:</div><img alt="" /><b></b></div>
     <div id="hint">F fullscreen · C calibrate · S setup · D debug · R record clip</div>
     <script type="module" src="/src/main.ts"></script>
   </body>

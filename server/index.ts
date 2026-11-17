@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { createServer } from 'node:http';
+import { saveCapture } from './captures';
 import { handleHealth, type HealthClient } from './health';
 import { CLIENT_OPTIONS, handleRecognize, UNKNOWN, type RecognizeClient } from './recognize';
 
@@ -22,7 +23,10 @@ createServer(async (req, res) => {
   for await (const c of req) chunks.push(c as Buffer);
   if (!anthropic) return json(UNKNOWN);
   const started = Date.now();
-  const rec = await handleRecognize(Buffer.concat(chunks), anthropic as unknown as RecognizeClient);
-  console.log(`[recognize] ${rec.kind} (${rec.confidence.toFixed(2)}) in ${Date.now() - started} ms`);
+  const png = Buffer.concat(chunks);
+  const rec = await handleRecognize(png, anthropic as unknown as RecognizeClient);
+  const ms = Date.now() - started;
+  const file = saveCapture('captures', png, rec, ms);
+  console.log(`[recognize] ${rec.kind} (${rec.confidence.toFixed(2)}) in ${ms} ms  -> captures/${file}`);
   json(rec);
 }).listen(PORT, () => console.log(`recognition server on http://localhost:${PORT}`));
