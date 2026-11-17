@@ -1,7 +1,7 @@
 export type CheckState = 'pending' | 'ok' | 'fail';
 export type CheckKey = 'camera' | 'wall' | 'server' | 'shadow';
 export type CheckItem = { key: CheckKey; label: string; state: CheckState; detail: string };
-export type Health = { ok: boolean; claude: 'ok' | 'no-key' | 'bad-key' | 'error'; ms?: number; message?: string };
+export type Health = { ok: boolean; claude: 'ok' | 'no-key' | 'bad-key' | 'error'; ms?: number; message?: string; provider?: 'Claude' | 'Jev' };
 
 const AUTO_HIDE_MS = 2000;
 const LABELS: Record<CheckKey, string> = {
@@ -56,10 +56,12 @@ export class Checklist {
 /** Turn the server's /api/health answer (null = unreachable) into a checklist line. */
 export function describeHealth(h: Health | null): [CheckState, string] {
   if (!h) return ['fail', 'Server not running — run: npm run server'];
+  const who = h.provider ?? 'Claude';
+  if (who === 'Jev' && h.claude === 'bad-key') return ['fail', 'OpenRouter key rejected — check OPENROUTER_API_KEY (openrouter.ai/settings/keys)'];
   switch (h.claude) {
-    case 'ok': return ['ok', `Claude connected (${h.ms} ms)`];
+    case 'ok': return ['ok', `${who} connected (${h.ms} ms)`];
     case 'no-key': return ['fail', 'No API key in the server’s terminal — run: export ANTHROPIC_API_KEY=sk-ant-…  then npm run server'];
     case 'bad-key': return ['fail', 'API key rejected — it may be incomplete or revoked; make a new one at console.anthropic.com'];
-    default: return ['fail', `Can't reach Claude: ${h.message ?? 'unknown error'}`];
+    default: return ['fail', `Can't reach ${who}: ${h.message ?? 'unknown error'}`];
   }
 }

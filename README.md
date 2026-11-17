@@ -21,7 +21,7 @@ across the wall.
 
 ```bash
 npm install
-export ANTHROPIC_API_KEY=<your key>   # in the same terminal
+export OPENROUTER_API_KEY=<your OpenRouter key>   # Jev recognition (or ANTHROPIC_API_KEY for Claude)
 npm start          # page (http://localhost:5173) + recognition server together
 ```
 
