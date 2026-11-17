@@ -98,6 +98,16 @@ export function installSimCamera(stage: () => HTMLCanvasElement): void {
       out.fillRect(40, 120, 50, 30); out.fillRect(40, 220, 50, 30); // books (dark)
       out.drawImage(sceneCanvas, 150, 110, 380, 285); // the wall, smaller in view
     }
+    if (params.has('noise')) {
+      // a real (phone) camera: every pixel jitters a few levels, a little differently per colour
+      const amp = Number(params.get('noise') || 8);
+      const img = out.getImageData(0, 0, 640, 480), d = img.data;
+      for (let i = 0; i < d.length; i += 4) {
+        const common = (Math.random() + Math.random() - 1) * amp;
+        for (let c = 0; c < 3; c++) d[i + c] += common + (Math.random() - 0.5) * amp;
+      }
+      out.putImageData(img, 0, 0);
+    }
     requestAnimationFrame(draw);
   };
   draw();

@@ -126,7 +126,7 @@ models: `npm run bakeoff -- typesafe/jev-1.14 google/gemini-decision-1`.
 ## Try it without a projector
 
 `http://localhost:5173/?sim=dog` (or `rabbit`, `butterfly`, `swan`, `point` for drawing; add `&wake`
-to also point at the resting drawings) replaces
+to also point at the resting drawings; `&warm`, `&ambient=0.6` and `&noise=6` imitate lamps, a lit room and a phone camera) replaces
 the webcam with a simulator: it films the page like a camera and adds a fake
 arm and hand that reach in and hold still.
 

@@ -11,14 +11,3 @@ describe('minPool2 (real-room report: fingers never turn red)', () => {
     expect(out.data[10 * 32 + 20]).toBe(200);
   });
 });
-
-import { rgbaToBright } from '../../src/camera';
-describe('rgbaToBright (vivid coloured light is never a shadow)', () => {
-  it('a saturated blue glow counts as bright, a real shadow stays dark', () => {
-    const px = new Uint8ClampedArray([40, 60, 255, 255, /* blue glow */ 255, 40, 190, 255, /* magenta */ 60, 55, 50, 255 /* shadow */]);
-    const b = rgbaToBright(px, 3);
-    expect(b[0]).toBeGreaterThan(200);
-    expect(b[1]).toBeGreaterThan(200);
-    expect(b[2]).toBeLessThan(70);
-  });
-});

@@ -180,3 +180,40 @@ describe('bridgeOwnInk (old drawings must not cut the hand apart)', () => {
     expect(m.data[90 * 100 + 50]).toBe(0);
   });
 });
+
+import { ownInk } from '../../src/vision/shadowMask';
+
+describe('shadowMask with what we project (lamp-lit room, ordinary brightness)', () => {
+  // the user's room: projector off 136, white wall 180 (camera luma), noise of a few levels
+  const W = 60, H = 40, n = W * H;
+  const g = (f: (i: number) => number) => ({ width: W, height: H, data: Uint8ClampedArray.from({ length: n }, (_, i) => f(i)) });
+  const black = g(() => 136), white = g(() => 180);
+  const noise = (i: number) => ((i * 7919) % 7) - 3; // ±3 levels, deterministic
+  const inkRow = (i: number) => Math.floor(i / W) >= 18 && Math.floor(i / W) < 21 && i % W >= 10 && i % W < 50; // a coloured line
+  const projected = g((i) => (inkRow(i) ? 107 : 255)); // our blue/violet/pink line ≈ 42% as bright as white
+
+  it('the plain wall is not a shadow, even with camera noise', () => {
+    const frame = g((i) => 180 + noise(i));
+    expect(shadowMask(frame, white, 0.45, black, projected).data.reduce((a, b) => a + b, 0)).toBe(0);
+  });
+
+  it('our coloured line is not a shadow, even when the room makes it look darker than predicted', () => {
+    // a lit room flattens it: camera sees it only ~18% of the way from "off" to white
+    const frame = g((i) => (inkRow(i) ? 136 + 0.18 * 44 : 180) + noise(i));
+    expect(shadowMask(frame, white, 0.45, black, projected).data.reduce((a, b) => a + b, 0)).toBe(0);
+  });
+
+  it('a finger shadow on the white wall is found, and does not spread along our line', () => {
+    const finger = (i: number) => Math.floor(i / W) >= 10 && Math.floor(i / W) < 30 && i % W >= 5 && i % W < 12;
+    const frame = g((i) => (finger(i) ? 137 : inkRow(i) ? 136 + 0.18 * 44 : 180) + noise(i));
+    const m = shadowMask(frame, white, 0.45, black, projected);
+    expect(m.data[15 * W + 8]).toBe(1); // the finger
+    expect(m.data[19 * W + 30]).toBe(0); // the line far from it
+  });
+
+  it('ownInk marks our line (where a hand may be cut)', () => {
+    const ink = ownInk(projected);
+    expect(ink.data[19 * W + 30]).toBe(1);
+    expect(ink.data[5 * W + 30]).toBe(0);
+  });
+});

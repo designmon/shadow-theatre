@@ -8,7 +8,7 @@ export type Burst = { kind: 'start' | 'finish'; at: Pt };
 const ARM_MS = 350; // point (and hold roughly still) this long to turn the pen on
 const ARM_STILL = 22; // px: reaching in while pointing doesn't draw a line from the edge
 const POSE_MS = 130; // a pose must hold this long before the pen reacts (no flicker)
-const UP_MS = 320; // lifting the pen mid-line needs a clearly open hand, not a flicker of the pose
+const UP_MS = 600; // lifting the pen mid-line needs a clearly open hand, not a flicker of the pose
 const FIST_MS = 380; // a fist held this long finishes the drawing
 const LOST_MS = 800; // hand out of the light this long = finished
 const MIN_STEP = 3; // px between stored points
@@ -78,6 +78,8 @@ export class LaserPen {
         if (this.pose === 'point') {
           if (this.mode === 'up') { this.strokes.push([]); this.times.push([]); this.mode = 'down'; }
           const s = this.strokes[this.strokes.length - 1], last = s[s.length - 1];
+          // the hand just opened (maybe lifting): pause, don't draw where it moves; a flicker resumes the line
+          if (this.seenPose !== 'point') break;
           if (!last || Math.hypot(this.cursor!.x - last.x, this.cursor!.y - last.y) >= MIN_STEP) { s.push({ ...this.cursor! }); this.times[this.times.length - 1].push(tMs); }
         } else if (this.mode === 'down') this.mode = 'up';
         break;

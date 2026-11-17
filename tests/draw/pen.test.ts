@@ -43,8 +43,9 @@ describe('LaserPen with gestures', () => {
     const pen = new LaserPen();
     run(pen, 0, 600, () => ({ x: 500, y: 300 }));
     run(pen, 633, 1600, arc(633, 500));
-    expect(run(pen, 1633, 2200, (t) => ({ x: 700, y: 200 + (t - 1633) * 0.2 }), 'open').mode).toBe('up');
-    const s = run(pen, 2233, 3200, arc(2233, 700));
+    expect(run(pen, 1633, 2500, (t) => ({ x: 500 + (t - 1633) * 0.23, y: 300 - (t - 1633) * 0.1 }), 'open').mode).toBe('up');
+    const s = run(pen, 2533, 3500, arc(2533, 700));
+    expect(Math.max(...s.strokes[0].map((p) => p.x))).toBeLessThan(660); // nothing drawn while the hand was open
     expect(s.strokes.length).toBe(2);
     expect(s.strokes[1][0].x).toBeGreaterThan(650); // no ink where the hand moved while open
   });

@@ -16,13 +16,13 @@ import { HoldDetector } from './vision/hold';
 import { projectBox, projectMask } from './vision/project';
 import { analyzeScene, isUsablePuppet, sceneLit, usableReason, type Scene } from './vision/scene';
 import { setBlur } from './creatures/style';
-import { bridgeOwnInk, buildExpected, dilate, erode, keepInside, litMask, shadowMask, smoothMask, wallInterior } from './vision/shadowMask';
+import { bridgeOwnInk, dilate, erode, keepInside, litMask, minFilter, ownInk, shadowMask, smoothMask, wallInterior } from './vision/shadowMask';
 import { installSimCamera } from './sim';
 import { recognize } from './recognize/client';
 import { maskToPng, snapshotRegion } from './vision/snapshot';
 import { LaserPen, type PenState } from './draw/pen';
 import { Doodle, motionFor, type Motion } from './draw/doodle';
-import { accentAt, doodleToPng, drawInkMask, drawPen } from './draw/render';
+import { accentAt, doodleToPng, drawPen } from './draw/render';
 import { Sparkles } from './draw/sparkles';
 import { applyH } from './calibration/homography';
 
@@ -122,24 +122,36 @@ function projectedDarkInCamera(frame: Gray, withOverlay = true, steadyOnly = fal
   return withOverlay ? dilate(cam, 2) : cam; // dilate for masking (blur halo), exact for the alignment check
 }
 
-/** Where the laser cue and the line being drawn are (camera px): ignored as shadows, but not an "edge". */
-let penCanvas: OffscreenCanvas | null = null;
-function penInCamera(frame: Gray): Mask | null {
-  if (penState.mode === 'idle' || penState.mode === 'arming' || !calib) return null;
+/**
+ * How bright we project each camera pixel right now (0 = black, 255 = white): the stage picture
+ * itself, so drawings, black ink, the coloured pen line and sparkles are all expected. Panels on
+ * the wall count as dark (ignored). Spread by 2 px toward the darker, for small misalignment.
+ */
+let projCanvas: OffscreenCanvas | null = null;
+function projectedInCamera(frame: Gray): Gray {
   const { w, h } = stage.size();
   const dw = Math.ceil(w * DARK_SCALE), dh = Math.ceil(h * DARK_SCALE);
-  if (!penCanvas || penCanvas.width !== dw || penCanvas.height !== dh) penCanvas = new OffscreenCanvas(dw, dh);
-  const pctx = penCanvas.getContext('2d', { willReadFrequently: true })! as unknown as CanvasRenderingContext2D;
+  if (!projCanvas || projCanvas.width !== dw || projCanvas.height !== dh) projCanvas = new OffscreenCanvas(dw, dh);
+  const pctx = projCanvas.getContext('2d', { willReadFrequently: true })! as unknown as CanvasRenderingContext2D;
   pctx.setTransform(1, 0, 0, 1, 0, 0);
-  pctx.clearRect(0, 0, dw, dh);
-  pctx.setTransform(DARK_SCALE, 0, 0, DARK_SCALE, 0, 0);
-  drawInkMask(pctx, penState); // only the black ink could pass for a shadow; the glow and sparkles are bright
-  pctx.setTransform(1, 0, 0, 1, 0, 0);
+  pctx.fillStyle = '#fff';
+  pctx.fillRect(0, 0, dw, dh);
+  pctx.drawImage(stage.canvas, 0, 0, dw, dh);
   const rgba = pctx.getImageData(0, 0, dw, dh).data;
-  const small: Mask = { width: dw, height: dh, data: new Uint8Array(dw * dh) };
-  for (let i = 0; i < small.data.length; i++) small.data[i] = rgba[i * 4 + 3] > 40 ? 1 : 0;
-  const H = calib.camToProj.map((v, i) => (i < 6 ? v * DARK_SCALE : v));
-  return dilate(warpMask(small, H, frame.width, frame.height), 2);
+  const small = new Uint8Array(dw * dh);
+  for (let i = 0; i < small.length; i++) small[i] = (rgba[i * 4] * 77 + rgba[i * 4 + 1] * 150 + rgba[i * 4 + 2] * 29) >> 8;
+  const rects = [];
+  if (debug) rects.push({ x: 0, y: 0, w: w * 0.18 + 40, h: w * 0.18 * 0.75 + 140 });
+  const pr = panel?.rect();
+  if (pr) rects.push({ x: pr.x - 20, y: pr.y - 20, w: pr.w + 40, h: pr.h + 40 });
+  for (const r of rects) {
+    const x0 = Math.max(0, Math.floor(r.x * DARK_SCALE)), x1 = Math.min(dw, Math.ceil((r.x + r.w) * DARK_SCALE));
+    const y0 = Math.max(0, Math.floor(r.y * DARK_SCALE)), y1 = Math.min(dh, Math.ceil((r.y + r.h) * DARK_SCALE));
+    for (let y = y0; y < y1; y++) small.fill(0, y * dw + x0, y * dw + Math.max(x0, x1));
+  }
+  const H = calib!.camToProj.map((v, i) => (i < 6 ? v * DARK_SCALE : v));
+  const cam = warpMask({ width: dw, height: dh, data: small }, H, frame.width, frame.height);
+  return minFilter({ width: cam.width, height: cam.height, data: Uint8ClampedArray.from(cam.data) }, 2);
 }
 
 let lastCapUrl: string | null = null;
@@ -214,8 +226,8 @@ async function main() {
       calib = await runCalibration(stage, video, auto && calib ? calib : undefined);
       // only the projected picture counts as wall: never the room around it
       const wall = wallMask(calib.camToProj, stage.size().w, stage.size().h, calib.whiteRef.width, calib.whiteRef.height);
-      lit = litMask(calib.whiteLuma ?? calib.whiteRef, calib.darkLuma ?? calib.dark); // where the picture reaches: ordinary brightness
-      const blocked = calibrationWarning(wall, lit, calib.whiteLuma ?? calib.whiteRef);
+      lit = litMask(calib.whiteRef, calib.dark);
+      const blocked = calibrationWarning(wall, lit, calib.whiteRef);
       const litBefore = countOnes(lit);
       for (let i = 0; i < lit.data.length; i++) lit.data[i] &= wall.data[i];
       lit = wallInterior(lit, 3); // the border between picture and bare wall is not a shadow
@@ -271,11 +283,11 @@ async function main() {
     let mask: Mask;
     let scene: Scene | null = null;
     if (calib) {
-      const shapesDark = projectedDarkInCamera(frame); // our creatures + on-wall panels
-      const penDark = penInCamera(frame);
-      const dark = penDark ? { ...shapesDark, data: shapesDark.data.map((v, i) => v | penDark.data[i]) } : shapesDark;
+      // what we project right now (ink, drawings, the coloured pen line, panels), as the camera sees it
+      const projected = projectedInCamera(frame);
+      const dark = ownInk(projected);
       darkPx = countOnes(dark);
-      mask = shadowMask(frame, buildExpected(calib.whiteRef, dark), 0.45, calib.dark);
+      mask = shadowMask(frame, calib.whiteRef, 0.45, calib.dark, projected);
       // a hand reaching across a drawing is cut in two where our own ink is: join it back up
       mask = bridgeOwnInk(mask, dark, 5);
       const rawPx = countOnes(mask);

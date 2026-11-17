@@ -40,39 +40,28 @@ let scratch: OffscreenCanvas | null = null;
  * averaged into the white wall.
  */
 export function grabGray(video: HTMLVideoElement, w = 320, h = 240): Gray {
-  return grabFrame(video, w, h).bright;
+  return grabFrame(video, w, h).luma;
 }
 
 /**
- * One camera frame two ways. `bright` (strongest channel) is for finding shadows: our coloured
- * ink must not read as shadow. `luma` (ordinary brightness) is for calibration — "where did the
- * projector add light?" — because under warm lamps the red channel is already near the top of
- * the camera's range, so the strongest channel barely changes on the picture while the light the
- * projector spills around the room shows up instead.
+ * One camera frame as ordinary brightness (luma). The strongest colour channel was tried for shadows and failed in a lamp-lit room: with warm light the red
+ * channel sits near the top of the camera's range, so "projector on" and "off" differ by a few
+ * levels and camera noise turned the white wall into "shadow". Coloured ink is handled by
+ * predicting what we project instead (shadowMask's `projected`).
  */
-export function grabFrame(video: HTMLVideoElement, w = 320, h = 240): { bright: Gray; luma: Gray } {
+export function grabFrame(video: HTMLVideoElement, w = 320, h = 240): { luma: Gray } {
   const W = w * 2, H = h * 2;
   if (!scratch || scratch.width !== W || scratch.height !== H) scratch = new OffscreenCanvas(W, H);
   const ctx = scratch.getContext('2d', { willReadFrequently: true })!;
   ctx.drawImage(video, 0, 0, W, H);
   const rgba = ctx.getImageData(0, 0, W, H).data;
-  return { bright: minPool2(rgbaToBright(rgba, W * H), W, H), luma: minPool2(rgbaToLuma(rgba, W * H), W, H) };
+  return { luma: minPool2(rgbaToLuma(rgba, W * H), W, H) };
 }
 
 /** Ordinary (luminance) brightness. */
 export function rgbaToLuma(rgba: Uint8ClampedArray, n: number): Uint8ClampedArray {
   const out = new Uint8ClampedArray(n);
   for (let i = 0, j = 0; j < n; i += 4, j++) out[j] = (rgba[i] * 77 + rgba[i + 1] * 150 + rgba[i + 2] * 29) >> 8;
-  return out;
-}
-
-/**
- * Brightness as the strongest colour channel: projected colour (a vivid blue or magenta glow)
- * reads as lit, only the absence of light (a shadow, black ink) reads as dark.
- */
-export function rgbaToBright(rgba: Uint8ClampedArray, n: number): Uint8ClampedArray {
-  const out = new Uint8ClampedArray(n);
-  for (let i = 0, j = 0; j < n; i += 4, j++) out[j] = Math.max(rgba[i], rgba[i + 1], rgba[i + 2]);
   return out;
 }
 

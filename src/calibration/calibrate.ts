@@ -8,8 +8,7 @@ import { dilate } from '../vision/shadowMask';
 import type { Mask } from '../types';
 import { drawCalibrationPattern, findMarkersDetailed } from './pattern';
 
-/** whiteRef / dark: strongest-channel references for finding shadows. whiteLuma / darkLuma: ordinary brightness, for where the picture is. */
-export type Calibration = { camToProj: H; projToCam: H; whiteRef: Gray; dark: Gray; whiteLuma?: Gray; darkLuma?: Gray; method?: 'squares' | 'picture' };
+export type Calibration = { camToProj: H; projToCam: H; whiteRef: Gray; dark: Gray; method?: 'squares' | 'picture' };
 
 /** Calibration failed: carries what the camera saw, for the setup card. */
 export class CalibrationError extends Error {
@@ -31,7 +30,7 @@ export let lastCalibrationFrames: { dark: Gray; squares: Gray; white: Gray } | n
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Average several frames to suppress projector (DLP) flicker. */
-type Pair = { bright: Gray; luma: Gray };
+type Pair = { luma: Gray };
 async function grabAveraged(video: HTMLVideoElement, n = 5): Promise<Pair> {
   const frames: Pair[] = [];
   for (let i = 0; i < n; i++) {
@@ -48,7 +47,7 @@ async function grabAveraged(video: HTMLVideoElement, n = 5): Promise<Pair> {
     }
     return { width, height, data };
   };
-  return { bright: avg('bright'), luma: avg('luma') };
+  return { luma: avg('luma') };
 }
 
 /** Wait (up to 2 s) until the webcam's auto-exposure has stopped changing the picture. */
@@ -104,7 +103,7 @@ export async function runCalibration(stage: Stage, video: HTMLVideoElement, keep
   if (!solved) throw lastErr;
   console.log('[shadow] calibrated using', solved.method);
   if (keep) return { ...keep, camToProj: solved.camToProj, projToCam: solved.projToCam, method: solved.method };
-  return { camToProj: solved.camToProj, projToCam: solved.projToCam, whiteRef: white.bright, dark: dark.bright, whiteLuma: white.luma, darkLuma: dark.luma, method: solved.method };
+  return { camToProj: solved.camToProj, projToCam: solved.projToCam, whiteRef: white.luma, dark: dark.luma, method: solved.method };
 }
 
 const MIN_AGREEMENT = 0.75; // IoU between "where we think the picture is" and "what actually lit up"

@@ -16,7 +16,7 @@ function percentile(values: Uint8ClampedArray, p: number): number {
  * Real-shadow mask. Without `expected`, a global threshold at `ratio` x the
  * 90th-percentile brightness (the lit wall).
  */
-export function shadowMask(frame: Gray, expected: Gray | null, ratio = 0.45, black?: Gray): Mask {
+export function shadowMask(frame: Gray, expected: Gray | null, ratio = 0.45, black?: Gray, projected?: Gray): Mask {
   const { width, height, data } = frame;
   const out: Mask = { width, height, data: new Uint8Array(width * height) };
   if (!expected) {
@@ -45,6 +45,16 @@ export function shadowMask(frame: Gray, expected: Gray | null, ratio = 0.45, bla
       // 2 = firm shadow, 1 = soft (fingers further from the wall): kept only if connected to firm.
       const b = black.data[i];
       if (e - b < MIN_CONTRAST) continue;
+      const f = projected ? projected.data[i] / 255 : 1; // how bright we project this spot (1 = white)
+      if (f < INK) continue; // our own black ink / drawings: can't tell a shadow there
+      if (f < WHITE) {
+        // our coloured ink: dimmer than white, so a shadow is judged against what we expect there.
+        // Conservative (projector and camera aren't linear, a lit room flattens colours): only a
+        // near-total loss of light counts, and never as a soft shadow that could grow from a finger.
+        const lin = Math.pow(f, 2.2);
+        out.data[i] = data[i] < gain * (b + SPLIT * lin * (e - b)) ? 2 : 0;
+        continue;
+      }
       out.data[i] = data[i] < gain * (b + SPLIT * (e - b)) ? 2 : data[i] < gain * (b + SOFT_SPLIT * (e - b)) ? 1 : 0;
     } else {
       out.data[i] = data[i] < ratio * gain * e ? 1 : 0;
@@ -73,6 +83,32 @@ const SPLIT = 0.5; // halfway between "projector off" and "projector on"
 const MIN_CONTRAST = 12; // the projector must brighten a pixel at least this much to judge it
 
 const MIN_LIT = 40;
+const INK = 0.2; // projected darker than this: our own ink (ignored)
+const WHITE = 0.9; // projected brighter than this: plain white wall
+
+/** Where we project our own ink / drawings (dark or coloured): the hand's shadow may be cut there. */
+export function ownInk(projected: Gray): Mask {
+  const data = new Uint8Array(projected.data.length);
+  for (let i = 0; i < data.length; i++) data[i] = projected.data[i] < WHITE * 255 ? 1 : 0;
+  return { width: projected.width, height: projected.height, data };
+}
+
+/** Darkest value within r px (separable): where content may be a pixel or two off, expect the darker. */
+export function minFilter(g: Gray, r: number): Gray {
+  const { width: W, height: H } = g;
+  const tmp = new Uint8ClampedArray(W * H), out = new Uint8ClampedArray(W * H);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    let v = 255;
+    for (let k = Math.max(0, x - r); k <= Math.min(W - 1, x + r); k++) v = Math.min(v, g.data[y * W + k]);
+    tmp[y * W + x] = v;
+  }
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    let v = 255;
+    for (let k = Math.max(0, y - r); k <= Math.min(H - 1, y + r); k++) v = Math.min(v, tmp[k * W + x]);
+    out[y * W + x] = v;
+  }
+  return { width: W, height: H, data: out };
+}
 
 /** What the camera should see: the white reference, except where we project black. */
 export function buildExpected(whiteRef: Gray, projectedDarkCam: Mask): Gray {
