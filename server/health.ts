@@ -4,7 +4,7 @@ import type { Health } from '../src/setup/checklist';
 export type HealthClient = { models: { retrieve: (id: string) => Promise<unknown> } } | null;
 
 /** Checks the key works with a free Models API call; never throws. */
-export async function handleHealth(client: HealthClient): Promise<Health> {
+export async function handleHealth(client: HealthClient, env: { keySet: boolean } = { keySet: true }): Promise<Health> {
   if (!client) return { ok: true, claude: 'no-key' };
   const started = Date.now();
   try {
@@ -12,7 +12,7 @@ export async function handleHealth(client: HealthClient): Promise<Health> {
     return { ok: true, claude: 'ok', ms: Date.now() - started };
   } catch (err) {
     const status = (err as { status?: number }).status;
-    if (status === 401 || status === 403) return { ok: true, claude: 'bad-key' };
+    if (status === 401 || status === 403) return { ok: true, claude: env.keySet ? 'bad-key' : 'no-key' };
     return { ok: true, claude: 'error', message: err instanceof Error ? err.message : String(err) };
   }
 }

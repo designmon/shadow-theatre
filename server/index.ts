@@ -14,7 +14,7 @@ try {
 
 createServer(async (req, res) => {
   const json = (body: unknown) => res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(body));
-  if (req.method === 'GET' && req.url === '/api/health') return json(await handleHealth(anthropic as unknown as HealthClient));
+  if (req.method === 'GET' && req.url === '/api/health') return json(await handleHealth(anthropic as unknown as HealthClient, { keySet: !!process.env.ANTHROPIC_API_KEY }));
   if (req.method !== 'POST' || req.url !== '/api/recognize') {
     res.writeHead(404).end();
     return;

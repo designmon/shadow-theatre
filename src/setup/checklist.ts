@@ -58,8 +58,8 @@ export function describeHealth(h: Health | null): [CheckState, string] {
   if (!h) return ['fail', 'Server not running — run: npm run server'];
   switch (h.claude) {
     case 'ok': return ['ok', `Claude connected (${h.ms} ms)`];
-    case 'no-key': return ['fail', 'No API key — set ANTHROPIC_API_KEY, restart npm run server'];
-    case 'bad-key': return ['fail', 'API key rejected — check ANTHROPIC_API_KEY'];
+    case 'no-key': return ['fail', 'No API key in the server’s terminal — run: export ANTHROPIC_API_KEY=sk-ant-…  then npm run server'];
+    case 'bad-key': return ['fail', 'API key rejected — it may be incomplete or revoked; make a new one at console.anthropic.com'];
     default: return ['fail', `Can't reach Claude: ${h.message ?? 'unknown error'}`];
   }
 }

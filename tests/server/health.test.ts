@@ -25,3 +25,11 @@ describe('server health', () => {
     expect(await handleHealth(null)).toMatchObject({ ok: true, claude: 'no-key' });
   });
 });
+
+describe('health: key not set in the server terminal', () => {
+  it('says no-key when ANTHROPIC_API_KEY is missing, even if the API answers 401', async () => {
+    const err = Object.assign(new Error('401'), { status: 401 });
+    const r = await handleHealth({ models: { retrieve: async () => { throw err; } } }, { keySet: false });
+    expect(r.claude).toBe('no-key');
+  });
+});
