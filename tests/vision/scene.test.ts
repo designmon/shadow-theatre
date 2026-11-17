@@ -136,3 +136,33 @@ describe('shadows cut by an ignored area (setup card, debug view)', () => {
     expect(s.openSide).toBe('right');
   });
 });
+
+describe('wall smaller than the camera view (camera off to the side)', () => {
+  it('the hand part is measured against the wall, not the whole camera frame', () => {
+    const lit = fillRect(mask(W, H), 100, 80, 100, 80, 1); // the wall is a small part of the view
+    const m = mask(W, H);
+    fillRect(m, 100, 115, 60, 8, 1);  // arm from the wall's left edge
+    fillRect(m, 160, 105, 20, 20, 1); // hand
+    const s = analyzeScene(m, findBlobs(m), lit)!;
+    expect(s.openSide).toBe('right');
+    expect(s.puppetBox.x).toBeGreaterThanOrEqual(135); // the hand + a short piece of forearm, not the whole 60px arm
+  });
+});
+
+describe('big shapes with tall ears (review of a real-room report)', () => {
+  it('a big rabbit on an arm reaching right is a usable puppet reaching right', () => {
+    const lit = fillRect(mask(W, H), 60, 40, 200, 150, 1);
+    const ignored = mask(W, H);
+    const m = mask(W, H);
+    fillRect(m, 70, 70, 30, 120, 1);  // body, standing on the bottom edge of the picture
+    fillRect(m, 100, 120, 70, 10, 1); // arm
+    fillRect(m, 165, 105, 40, 34, 1); // big hand
+    fillRect(m, 172, 45, 9, 60, 1);   // tall ears
+    fillRect(m, 188, 48, 9, 57, 1);
+    const s = analyzeScene(m, findBlobs(m), sceneLit(lit, ignored))!;
+    expect(s.openSide).toBe('right');
+    expect(isUsablePuppet(s, mask(W, H), lit)).toBe(true);
+    expect(s.puppetBox.x).toBeGreaterThanOrEqual(110); // hand + ears + a bit of forearm, not the body (ends at x=100)
+    expect(s.puppetBox.y).toBeLessThanOrEqual(48);     // ears included
+  });
+});

@@ -5,6 +5,9 @@ import type { Blob } from './blobs';
 export type Scene = { puppet: Mask; puppetBox: Box; entry: Side | null; openSide: Side; bodyBox: Box | null; neck: number | null };
 
 const TIP_FRACTION = 0.3;
+const MIN_TIP_FRACTION = 0.12; // smallest puppet window, of the wall size
+const ARM_KEEP_FRACTION = 0.15; // arm kept behind the wrist, of the wall size
+const MAX_FAR_FRACTION = 0.7; // the puppet is never more than this much of the shadow's length
 const NECK_BAND = 6; // px behind the puppet used to measure the wrist/neck
 const MAX_NECK = 0.75; // a hand sticks out from a narrower arm; a head-and-shoulders doesn't
 
@@ -45,26 +48,92 @@ export function analyzeScene(mask: Mask, blobs: Blob[], lit?: Mask): Scene | nul
   }
   ax /= n; ay /= n;
 
-  // The puppet is the far end: the pixel farthest from the entry point sets the reach direction.
-  let fx = ax, fy = ay, best = -1;
+  // Distance ALONG the shadow from where it comes in (body -> arm -> hand -> ears).
+  // The puppet is the far end of that path, whichever way its ears or fingers point.
+  const inBlob = new Uint8Array(W * H);
+  for (const i of blob.pixels) inBlob[i] = 1;
+  const dist = new Int32Array(W * H).fill(-1);
+  const queue = new Int32Array(blob.pixels.length);
+  let qh = 0, qt = 0;
   for (const i of blob.pixels) {
     const x = i % W, y = (i / W) | 0;
-    const d = (x - ax) ** 2 + (y - ay) ** 2;
-    if (d > best) { best = d; fx = x; fy = y; }
+    if (off(x - 1, y) || off(x + 1, y) || off(x, y - 1) || off(x, y + 1)) { dist[i] = 0; queue[qt++] = i; }
   }
-  const dx = fx - ax, dy = fy - ay;
+  let far = 0;
+  while (qh < qt) {
+    const i = queue[qh++], x = i % W, d = dist[i] + 1;
+    if (dist[i] > far) far = dist[i];
+    const nb = [x > 0 ? i - 1 : -1, x < W - 1 ? i + 1 : -1, i - W, i + W];
+    for (const j of nb) if (j >= 0 && j < W * H && inBlob[j] && dist[j] < 0) { dist[j] = d; queue[qt++] = j; }
+  }
+
+  // measured against the wall as the camera sees it (it may fill only part of the view)
+  let wx0 = W, wx1 = -1, wy0 = H, wy1 = -1;
+  if (lit) for (let i = 0; i < lit.data.length; i++) if (lit.data[i]) {
+    const x = i % W, y = (i / W) | 0;
+    if (x < wx0) wx0 = x; if (x > wx1) wx1 = x; if (y < wy0) wy0 = y; if (y > wy1) wy1 = y;
+  }
+  const wallW = lit && wx1 >= wx0 ? wx1 - wx0 + 1 : W, wallH = lit && wy1 >= wy0 ? wy1 - wy0 + 1 : H;
+  // Find the wrist: walking back along the shadow from the fingertips/ears, the shadow
+  // widens into the hand and then narrows again at the wrist/forearm. Cut there.
+  const widths = new Float32Array(far + 1);
+  for (const i of blob.pixels) widths[dist[i]]++;
+  const smooth = (d: number) => {
+    let s = 0, k = 0;
+    for (let e = d - 2; e <= d + 2; e++) if (e >= 0 && e <= far) { s += widths[e]; k++; }
+    return s / k;
+  };
+  const minSpan = Math.max(wallW, wallH) * MIN_TIP_FRACTION;
+  let widest = far, widestW = -1;
+  for (let d = Math.floor(far * 0.55); d <= far; d++) { const w = smooth(d); if (w > widestW) { widestW = w; widest = d; } }
+  let wrist = Math.floor(far * 0.2), wristW = Infinity;
+  for (let d = Math.floor(far * 0.2); d <= widest; d++) { const w = smooth(d); if (w <= wristW) { wristW = w; wrist = d; } } // ties: the narrow spot nearest the hand
+  // a shadow with no clear wrist (one even blob) keeps a sensible minimum, and never the whole far side
+  const span = Math.min(far * MAX_FAR_FRACTION, Math.max(minSpan, far - wrist));
+
+  // The puppet keeps a short piece of arm behind the wrist: it's the swan's neck, and context for Claude.
+  const cut = far - span;
+  const keep = Math.max(0, Math.min(cut, Math.max(wallW, wallH) * ARM_KEEP_FRACTION, far * MAX_FAR_FRACTION - span));
+  // Walk back from the hand down the arm (only towards where the shadow comes in), counting steps.
+  // Parts of the body that are merely as far from the edge as the arm never get mixed in.
+  const back = new Int32Array(W * H).fill(-1);
+  const hand: number[] = [];
+  qh = 0; qt = 0;
+  for (const i of blob.pixels) if (dist[i] >= cut) { back[i] = 0; hand.push(i); queue[qt++] = i; }
+  const maxBack = Math.max(keep, 4 * NECK_BAND);
+  while (qh < qt) {
+    const i = queue[qh++], x = i % W;
+    if (back[i] >= maxBack) continue;
+    const nb = [x > 0 ? i - 1 : -1, x < W - 1 ? i + 1 : -1, i - W, i + W];
+    for (const j of nb) {
+      if (j < 0 || j >= W * H || !inBlob[j] || back[j] >= 0 || dist[j] >= dist[i]) continue;
+      back[j] = back[i] + 1;
+      queue[qt++] = j;
+    }
+  }
+  const tip: number[] = [], body: number[] = [], band: number[] = [], armBack: number[] = [];
+  for (const i of blob.pixels) {
+    const k = back[i];
+    if (k >= 1 && k <= NECK_BAND) band.push(i);
+    else if (k > 2 * NECK_BAND && k <= 4 * NECK_BAND) armBack.push(i);
+    (k >= 0 && k <= keep ? tip : body).push(i);
+  }
+  for (const i of tip) puppet.data[i] = 1;
+
+  // Reach direction: the way the arm points just before the wrist (ears/fingers can stick out
+  // sideways, the forearm doesn't); without an arm, from the wrist into the puppet.
+  const centroid = (idx: number[]) => {
+    let sx = 0, sy = 0;
+    for (const i of idx) { sx += i % W; sy += (i / W) | 0; }
+    return { x: sx / idx.length, y: sy / idx.length };
+  };
+  const [to, from] = band.length && armBack.length
+    ? [centroid(band), centroid(armBack)]
+    : [centroid(hand), band.length ? centroid(band) : { x: ax, y: ay }];
+  const dx = to.x - from.x, dy = to.y - from.y;
   const openSide: Side = Math.abs(dx) >= Math.abs(dy) ? (dx >= 0 ? 'right' : 'left') : dy >= 0 ? 'down' : 'up';
   const opposite: Record<Side, Side> = { left: 'right', right: 'left', up: 'down', down: 'up' };
 
-  // Distance (along the reach axis) back from the farthest point.
-  const back = (i: number) => {
-    const x = i % W, y = (i / W) | 0;
-    return openSide === 'right' ? fx - x : openSide === 'left' ? x - fx : openSide === 'down' ? fy - y : y - fy;
-  };
-  const span = (openSide === 'left' || openSide === 'right' ? W : H) * TIP_FRACTION;
-  const tip: number[] = [], body: number[] = [];
-  for (const i of blob.pixels) (back(i) <= span ? tip : body).push(i);
-  for (const i of tip) puppet.data[i] = 1;
   // How wide is the shadow just behind the puppet (wrist / forearm vs. torso)?
   const horizontal = openSide === 'left' || openSide === 'right';
   const cross = (i: number) => (horizontal ? (i / W) | 0 : i % W);
@@ -73,12 +142,11 @@ export function analyzeScene(mask: Mask, blobs: Blob[], lit?: Mask): Scene | nul
     for (const i of idx) { const c = cross(i); if (c < lo) lo = c; if (c > hi) hi = c; }
     return hi < lo ? 0 : hi - lo + 1;
   };
-  const band = body.filter((i) => back(i) <= span + NECK_BAND);
-  const neck = band.length ? extent(band) / Math.max(1, extent(tip)) : null;
+  const neck = band.length ? extent(band) / Math.max(1, extent(hand)) : null;
   return { puppet, puppetBox: boxOf(tip, W)!, entry: opposite[openSide], openSide, bodyBox: boxOf(body, W), neck };
 }
 
-const MAX_PUPPET_FRACTION = 0.25; // of the lit wall
+const MAX_PUPPET_FRACTION = 0.5; // of the lit wall (bodies are caught by the hand-sticking-out rule)
 const TOUCH_PX = 3;
 
 /**
@@ -86,11 +154,16 @@ const TOUCH_PX = 3;
  * (touching) one of our own projected creatures, and not so big it must be a body.
  */
 export function isUsablePuppet(scene: Scene, ownDarkCam: Mask, lit: Mask): boolean {
+  return usableReason(scene, ownDarkCam, lit) === null;
+}
+
+/** Why a puppet is ignored (null = usable). Shown in the debug view. */
+export function usableReason(scene: Scene, ownDarkCam: Mask, lit: Mask): string | null {
   let litArea = 0;
   for (const v of lit.data) litArea += v;
   const b = scene.puppetBox;
-  if (b.w * b.h > MAX_PUPPET_FRACTION * litArea) return false;
-  if (scene.neck !== null && scene.neck > MAX_NECK) return false; // not a protrusion: someone just standing there
+  if (b.w * b.h > MAX_PUPPET_FRACTION * litArea) return 'ignored: too big (looks like a body)';
+  if (scene.neck !== null && scene.neck > MAX_NECK) return 'ignored: not a hand sticking out (body / standing)'; // someone just standing there
   const W = ownDarkCam.width, H = ownDarkCam.height;
   for (let y = Math.max(0, b.y - TOUCH_PX); y < Math.min(H, b.y + b.h + TOUCH_PX); y++) {
     for (let x = Math.max(0, b.x - TOUCH_PX); x < Math.min(W, b.x + b.w + TOUCH_PX); x++) {
@@ -98,11 +171,11 @@ export function isUsablePuppet(scene: Scene, ownDarkCam: Mask, lit: Mask): boole
       // is any puppet pixel within TOUCH_PX of this dark pixel?
       for (let dy = -TOUCH_PX; dy <= TOUCH_PX; dy++) for (let dx = -TOUCH_PX; dx <= TOUCH_PX; dx++) {
         const px = x + dx, py = y + dy;
-        if (px >= 0 && py >= 0 && px < W && py < H && scene.puppet.data[py * W + px]) return false;
+        if (px >= 0 && py >= 0 && px < W && py < H && scene.puppet.data[py * W + px]) return 'ignored: touching one of our creatures';
       }
     }
   }
-  return true;
+  return null;
 }
 
 /**

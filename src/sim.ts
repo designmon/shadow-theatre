@@ -12,8 +12,19 @@ export function installSimCamera(stage: () => HTMLCanvasElement): void {
   const cam = document.createElement('canvas');
   cam.width = 640;
   cam.height = 480;
-  const ctx = cam.getContext('2d')!;
+  const out = cam.getContext('2d')!;
+  // ?room: the wall is only part of the camera view, with furniture around it that
+  // catches some projector spill light (like a camera off to the side, further away)
+  const room = params.has('room');
+  const sceneCanvas = room ? document.createElement('canvas') : cam;
+  sceneCanvas.width = 640;
+  sceneCanvas.height = 480;
+  const ctx = sceneCanvas.getContext('2d')!;
+  const big = params.has('big') ? 1.8 : 1;
   const t0 = performance.now();
+  const probe = document.createElement('canvas');
+  probe.width = probe.height = 4;
+  const pctx = probe.getContext('2d', { willReadFrequently: true })!;
 
   const draw = () => {
     const t = (performance.now() - t0) / 1000;
@@ -34,8 +45,28 @@ export function installSimCamera(stage: () => HTMLCanvasElement): void {
       ctx.fillStyle = 'rgba(8,8,8,1)';
       ctx.fillRect(40, 140, 90, 360); // body against the left of the wall
       const hx = 130 + reach * 200;
-      ctx.fillRect(130, 250, hx - 130, 26); // arm
-      drawHand(ctx, shape, hx, 262);
+      ctx.fillRect(130, 250, hx - 130, 26 * big); // arm
+      ctx.save();
+      ctx.translate(hx, 262);
+      ctx.scale(big, big);
+      drawHand(ctx, shape, 0, 0);
+      ctx.restore();
+    }
+    if (room) {
+      // how bright is the projected picture right now (spill light on the furniture)
+      pctx.drawImage(stage(), 0, 0, 4, 4);
+      const px = pctx.getImageData(0, 0, 4, 4).data;
+      let lum = 0;
+      for (let i = 0; i < px.length; i += 4) lum += px[i];
+      const spill = Math.round(25 + (lum / 16) * 0.25);
+      out.fillStyle = '#151515';
+      out.fillRect(0, 0, 640, 480);
+      out.fillStyle = `rgb(${spill},${spill},${spill})`;
+      out.fillRect(20, 60, 90, 300); // a bookshelf beside the wall
+      out.fillRect(540, 300, 80, 160); // a chair
+      out.fillStyle = '#060606';
+      out.fillRect(40, 120, 50, 30); out.fillRect(40, 220, 50, 30); // books (dark)
+      out.drawImage(sceneCanvas, 150, 110, 380, 285); // the wall, smaller in view
     }
     requestAnimationFrame(draw);
   };
@@ -46,6 +77,7 @@ export function installSimCamera(stage: () => HTMLCanvasElement): void {
 }
 
 function drawHand(ctx: CanvasRenderingContext2D, shape: Shape, x: number, y: number) {
+  // drawn around (x, y)
   ctx.beginPath();
   if (shape === 'dog') {
     ctx.ellipse(x + 30, y - 5, 38, 26, 0, 0, Math.PI * 2);

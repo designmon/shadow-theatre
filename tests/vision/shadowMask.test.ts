@@ -86,3 +86,12 @@ describe('erode', () => {
     expect(bbox(erode(fillRect(mask(50, 50), 10, 10, 20, 20, 1), 3))).toEqual({ x: 13, y: 13, w: 14, h: 14 });
   });
 });
+
+import { keepInside } from '../../src/vision/shadowMask';
+describe('keepInside', () => {
+  it('drops shadow pixels outside the projected picture (furniture, room)', () => {
+    const m = fillRect(fillRect(mask(100, 100), 5, 5, 10, 10, 1), 50, 50, 10, 10, 1);
+    const wall = fillRect(mask(100, 100), 40, 40, 40, 40, 1);
+    expect(bbox(keepInside(m, wall))).toEqual({ x: 50, y: 50, w: 10, h: 10 });
+  });
+});

@@ -40,3 +40,12 @@ describe('homography', () => {
     expect(bbox(out)).toEqual({ x: 15, y: 10, w: 10, h: 10 });
   });
 });
+
+import { wallMask } from '../../src/calibration/homography';
+describe('wallMask', () => {
+  it('marks exactly the camera pixels that show the projected picture', () => {
+    const camToProj = [6, 0, 0, 0, 4.5, 0, 0, 0, 1]; // camera (0..160, 0..120) shows the 960x540 picture
+    const m = wallMask(camToProj, 960, 540, 320, 240);
+    expect(bbox(m)).toEqual({ x: 0, y: 0, w: 160, h: 120 });
+  });
+});

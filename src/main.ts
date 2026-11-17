@@ -1,6 +1,6 @@
 import { CalibrationError, runCalibration, type Calibration } from './calibration/calibrate';
 import { alignmentScore } from './calibration/alignment';
-import { warpMask } from './calibration/homography';
+import { wallMask, warpMask } from './calibration/homography';
 import { debounce, MisalignmentWatch } from './calibration/watch';
 import { grabGray, listCameras, saveCameraId, savedCameraId, startCamera } from './camera';
 import { Checklist, describeHealth, type Health } from './setup/checklist';
@@ -14,9 +14,9 @@ import type { Gray, Mask } from './types';
 import { findBlobs } from './vision/blobs';
 import { HoldDetector } from './vision/hold';
 import { projectBox, projectMask } from './vision/project';
-import { analyzeScene, isUsablePuppet, sceneLit, type Scene } from './vision/scene';
+import { analyzeScene, isUsablePuppet, sceneLit, usableReason, type Scene } from './vision/scene';
 import { setBlur } from './creatures/style';
-import { buildExpected, dilate, erode, litMask, shadowMask } from './vision/shadowMask';
+import { buildExpected, dilate, erode, keepInside, litMask, shadowMask } from './vision/shadowMask';
 import { installSimCamera } from './sim';
 import { recognize } from './recognize/client';
 import { maskToPng } from './vision/snapshot';
@@ -35,6 +35,7 @@ let lastRec = '—';
 const watch = new MisalignmentWatch();
 const STEADY_MS = 300; // only check creatures that have been fully opaque this long (camera/projector lag)
 let darkPx = 0;
+let whyIgnored: string | null = null;
 const countOnes = (m: Mask) => { let n = 0; for (const v of m.data) n += v; return n; };
 const checklist = new Checklist();
 let panel: SetupPanel | null = null;
@@ -144,7 +145,10 @@ async function main() {
     try {
       // automatic re-alignment: the performer is probably in the beam, so keep the reference frames
       calib = await runCalibration(stage, video, auto && calib ? calib : undefined);
+      // only the projected picture counts as wall: never the room around it
+      const wall = wallMask(calib.camToProj, stage.size().w, stage.size().h, calib.whiteRef.width, calib.whiteRef.height);
       lit = litMask(calib.whiteRef, calib.dark);
+      for (let i = 0; i < lit.data.length; i++) lit.data[i] &= wall.data[i];
       status = auto ? 're-aligned' : 'calibrated';
       checklist.wall('ok', auto ? 're-aligned after the projector moved' : 'projector found — 4 squares seen', performance.now());
       hold.reset();
@@ -194,6 +198,7 @@ async function main() {
       const dark = projectedDarkInCamera(frame);
       darkPx = countOnes(dark);
       mask = shadowMask(frame, buildExpected(calib.whiteRef, dark));
+      if (lit) mask = keepInside(mask, lit); // shadows only count on the projected picture
       // self-healing: if our creatures stop showing up where we project them, the projector moved
       const own = creatures.length ? projectedDarkInCamera(frame, false) : null;
       const steady = creatures.length ? erode(projectedDarkInCamera(frame, false, true), 2) : null;
@@ -201,6 +206,7 @@ async function main() {
       if (watch.push(score, now)) { status = 'projector moved — re-aligning'; calibrate(true); return; }
       scene = analyzeScene(mask, findBlobs(mask), lit ? sceneLit(lit, dark) : undefined);
       if (scene) checklist.shadow('ok', 'seen — make a shape and hold it still', now);
+      if (scene && lit) whyIgnored = usableReason(scene, own ?? { width: frame.width, height: frame.height, data: new Uint8Array(frame.data.length) }, lit);
       const usable = scene && lit && isUsablePuppet(scene, own ?? { width: frame.width, height: frame.height, data: new Uint8Array(frame.data.length) }, lit);
       if (scene && usable && hold.push(scene.puppet, now)) {
         const peel = spawnPeel(scene);
@@ -237,7 +243,7 @@ async function main() {
     clearWhite(stage);
     for (const c of creatures) c.draw(stage.ctx);
     if (debug) {
-      const lines = [status, scene ? `shadow from ${scene.entry ?? 'nowhere'} → open ${scene.openSide}` : 'no shadow', `${creatures.length} creature(s)`, `last seen: ${lastRec}`, `ignoring ${darkPx} px`];
+      const lines = [status, scene ? `shadow from ${scene.entry ?? 'nowhere'} → open ${scene.openSide}` : 'no shadow', `${creatures.length} creature(s)`, `last seen: ${lastRec}`, `ignoring ${darkPx} px`, scene ? `shape: ${whyIgnored ?? 'usable ✓'}` : ''];
       if (recorder.recording) lines.push('● REC');
       drawDebug(stage.ctx, { frame, mask, fps, lines, puppetBox: scene?.puppetBox ?? null });
     }

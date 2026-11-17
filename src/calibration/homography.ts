@@ -68,3 +68,13 @@ export function warpMask(mask: Mask, h: H, outW: number, outH: number): Mask {
   }
   return out;
 }
+
+/** Camera pixels that show the projected picture (their pixel centre maps inside the projector frame). */
+export function wallMask(camToProj: H, projW: number, projH: number, camW: number, camH: number): Mask {
+  const out: Mask = { width: camW, height: camH, data: new Uint8Array(camW * camH) };
+  for (let y = 0; y < camH; y++) for (let x = 0; x < camW; x++) {
+    const p = applyH(camToProj, { x: x + 0.5, y: y + 0.5 });
+    if (p.x >= 0 && p.y >= 0 && p.x < projW && p.y < projH) out.data[y * camW + x] = 1;
+  }
+  return out;
+}

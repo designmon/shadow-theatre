@@ -94,3 +94,10 @@ export function dilate(m: Mask, r: number): Mask {
   }
   return { width: W, height: H, data: out };
 }
+
+/** Only keep mask pixels inside `region` (e.g. shadows only on the projected picture). */
+export function keepInside(m: Mask, region: Mask): Mask {
+  const data = new Uint8Array(m.data.length);
+  for (let i = 0; i < data.length; i++) data[i] = m.data[i] & region.data[i];
+  return { width: m.width, height: m.height, data };
+}
