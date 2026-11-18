@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { compositionArea, layout, zoneOf } from '../../src/draw/composition';
 import { WallButton, pauseIcon } from '../../src/ui/wallButton';
+import { Clicker } from '../../src/ui/clicker';
 
 const area = compositionArea({ w: 1920, h: 1080 });
 const item = (label: string, h = 200) => ({ label, top: -h / 2, bottom: h / 2, left: -h / 2, right: h / 2 });
@@ -63,3 +64,19 @@ describe('the stop button: a quick fist over it', () => {
     expect(b.on).toBe(true);
   });
 });
+
+describe('a click with the hand (quick fist, then open)', () => {
+  it('clicks where the fist was; a flicker, a long hold or a double flicker after a click does not', () => {
+    const c = new Clicker(), at = { x: 300, y: 200 };
+    expect(c.feed(at, true, 0)).toBeNull();
+    expect(c.feed(at, true, 300)).toBeNull();
+    expect(c.feed(at, false, 400)).toEqual(at); // click
+    expect(c.feed(at, true, 500)).toBeNull();
+    expect(c.feed(at, false, 700)).toBeNull(); // right after: ignored
+    expect(c.feed(at, true, 2000)).toBeNull();
+    expect(c.feed(at, false, 2050)).toBeNull(); // a flicker
+    expect(c.feed(at, true, 3000)).toBeNull();
+    expect(c.feed(at, false, 5000)).toBeNull(); // held too long
+  });
+});
+

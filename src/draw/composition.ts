@@ -28,7 +28,7 @@ export type Decor = { area: Box; groundY: number | null; waterY: number | null; 
 
 /** The side of the wall the composition lives in (leaves the rest free for drawing). */
 export function compositionArea(wall: { w: number; h: number }): Box {
-  return { x: wall.w * 0.6, y: wall.h * 0.17, w: wall.w * 0.37, h: wall.h * 0.78 };
+  return { x: wall.w * 0.6, y: wall.h * 0.26, w: wall.w * 0.37, h: wall.h * 0.69 }; // below the pause button
 }
 
 export function layout(items: Item[], area: Box): { places: Placement[]; decor: Decor } {

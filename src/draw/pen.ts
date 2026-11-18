@@ -2,16 +2,18 @@ import type { Pt } from '../types';
 import { OneEuro2D } from './oneEuro';
 
 export type PenInput = { tip: Pt; pose: 'point' | 'fist' | 'open'; dir?: Pt };
-export type PenState = { mode: 'idle' | 'arming' | 'down' | 'up'; arm: number /* 0..1 while arming */; cursor: Pt | null; strokes: Pt[][] };
+export type PenState = { mode: 'idle' | 'arming' | 'down' | 'up'; arm: number /* 0..1 while arming */; finish: number /* 0..1 while a fist is held */; cursor: Pt | null; brush?: Pt | null /* where the ink is (trails the fingertip) */; strokes: Pt[][] };
 export type Burst = { kind: 'start' | 'finish'; at: Pt };
 
 const ARM_MS = 350; // point (and hold roughly still) this long to turn the pen on
 const ARM_STILL = 22; // px: reaching in while pointing doesn't draw a line from the edge
 const POSE_MS = 130; // a pose must hold this long before the pen reacts (no flicker)
 const UP_MS = 600; // lifting the pen mid-line needs a clearly open hand, not a flicker of the pose
-const FIST_MS = 380; // a fist held this long finishes the drawing
+const FIST_MS = 160; // curling the finger (a fist) lifts the pen this quickly...
+const FINISH_MS = 1300; // ...and held this long, finishes the drawing
 const LOST_MS = 800; // hand out of the light this long = finished
 const MIN_STEP = 3; // px between stored points
+const STRING = 10; // px: the lazy brush — ink trails the fingertip on a short string, so a tremor never reaches the line
 const MIN_POINTS = 8;
 const MAX_JUMP = 90; // px in one frame: a fingertip can't teleport; such a frame is a glitch
 const RETREAT_SPEED = 1.0; // px/ms: the hand being pulled out of the light, not drawing
@@ -30,7 +32,7 @@ export class LaserPen {
   private times: number[][] = [];
   private finished: Pt[][] | null = null;
   private bursts: Burst[] = [];
-  private filt = new OneEuro2D(1.5, 0.035);
+  private filt = new OneEuro2D(1.1, 0.03);
   private dir: Pt | null = null;
   private lastTip: Pt | null = null;
   private anchor: Pt | null = null; // where arming started
@@ -38,6 +40,8 @@ export class LaserPen {
   private pose: PenInput['pose'] | null = null; // the settled pose
   private seenPose: PenInput['pose'] | null = null; // the latest raw pose
   private seenSince = 0;
+  private fistSince: number | null = null;
+  private brush: Pt | null = null;
 
   update(input: PenInput | null, tMs: number): PenState {
     let tip = input?.tip ?? null;
@@ -55,7 +59,7 @@ export class LaserPen {
 
     switch (this.mode) {
       case 'idle':
-        if (tip && input!.pose === 'point') { this.mode = 'arming'; this.since = tMs; this.anchor = { ...tip }; this.filt = new OneEuro2D(1.5, 0.035); this.cursor = this.filt.filter(tip, tMs); }
+        if (tip && input!.pose === 'point') { this.mode = 'arming'; this.since = tMs; this.anchor = { ...tip }; this.filt = new OneEuro2D(1.1, 0.03); this.cursor = this.filt.filter(tip, tMs); }
         break;
       case 'arming':
         if (!tip || input!.pose !== 'point') { if (!tip ? tMs - this.lastSeen > 250 : true) this.reset(); break; }
@@ -63,6 +67,7 @@ export class LaserPen {
         if (tMs - this.since >= ARM_MS) {
           this.mode = 'down';
           this.strokes = [[{ ...this.cursor! }]];
+          this.brush = { ...this.cursor! };
           this.times = [[tMs]];
           this.pose = 'point';
           this.bursts.push({ kind: 'start', at: { ...this.cursor! } });
@@ -74,17 +79,34 @@ export class LaserPen {
           if (tMs - this.lastSeen > LOST_MS) { this.trimRetreat(); this.finish(); }
           break;
         }
-        if (this.pose === 'fist') { this.finish(); break; }
+        // curl the finger (fist): the pen lifts; point again for the next stroke (eyes, whiskers);
+        // keep the fist closed a moment longer to finish the drawing
+        if (this.pose === 'fist') {
+          if (this.fistSince === null) this.fistSince = tMs;
+          this.mode = 'up';
+          if (tMs - this.fistSince >= FINISH_MS) this.finish();
+          break;
+        }
+        this.fistSince = null;
         if (this.pose === 'point') {
-          if (this.mode === 'up') { this.strokes.push([]); this.times.push([]); this.mode = 'down'; }
+          if (this.mode === 'up') { this.strokes.push([]); this.times.push([]); this.mode = 'down'; this.brush = null; }
           const s = this.strokes[this.strokes.length - 1], last = s[s.length - 1];
           // the hand just opened (maybe lifting): pause, don't draw where it moves; a flicker resumes the line
           if (this.seenPose !== 'point') break;
-          if (!last || Math.hypot(this.cursor!.x - last.x, this.cursor!.y - last.y) >= MIN_STEP) { s.push({ ...this.cursor! }); this.times[this.times.length - 1].push(tMs); }
+          // lazy brush: the ink only moves when the fingertip pulls the string taut
+          const c = this.cursor!;
+          if (!this.brush) this.brush = { ...c };
+          else {
+            const dx = c.x - this.brush.x, dy = c.y - this.brush.y, d = Math.hypot(dx, dy);
+            if (d > STRING) { const k = (d - STRING) / d; this.brush = { x: this.brush.x + dx * k, y: this.brush.y + dy * k }; }
+          }
+          const b = this.brush;
+          if (!last || Math.hypot(b.x - last.x, b.y - last.y) >= MIN_STEP) { s.push({ ...b }); this.times[this.times.length - 1].push(tMs); }
         } else if (this.mode === 'down') this.mode = 'up';
         break;
     }
-    return { mode: this.mode, arm: this.mode === 'arming' ? Math.min(1, (tMs - this.since) / ARM_MS) : 0, cursor: this.mode === 'idle' ? null : this.cursor, strokes: this.strokes };
+    const finish = this.fistSince !== null && this.mode === 'up' ? Math.min(1, (tMs - this.fistSince) / FINISH_MS) : 0;
+    return { mode: this.mode, arm: this.mode === 'arming' ? Math.min(1, (tMs - this.since) / ARM_MS) : 0, finish, brush: this.mode === 'down' ? this.brush : null, cursor: this.mode === 'idle' ? null : this.cursor, strokes: this.strokes };
   }
 
   /** The finished drawing (its strokes), once, or null. */
@@ -129,6 +151,8 @@ export class LaserPen {
   }
 
   private reset() {
+    this.fistSince = null;
+    this.brush = null;
     this.mode = 'idle';
     this.cursor = null;
     this.strokes = [];

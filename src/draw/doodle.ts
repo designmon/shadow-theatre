@@ -6,6 +6,11 @@ import type { Creature } from '../creatures/types';
 import type { Box, Mask, Pt } from '../types';
 import { refineStroke } from './refine';
 import { fitIcon, type IconStroke } from './icons';
+import { chipAt, drawBubble, type Bubble, type BubbleLayout } from '../story/bubble';
+
+/** A little action: a hop, a spin, a shake, growing for a moment, or rain (a cloud). */
+export type Trick = 'jump' | 'spin' | 'shake' | 'grow' | 'rain';
+const TRICK_MS: Record<Trick, number> = { jump: 750, spin: 900, shake: 700, grow: 900, rain: 2600 };
 
 /** How a drawing comes alive. */
 export const MOTIONS = ['fly', 'swim', 'slither', 'hop', 'walk', 'sway', 'float', 'beat', 'twinkle', 'spin'] as const;
@@ -126,7 +131,13 @@ export class Doodle implements Creature {
   private t = 0;
   private aliveAt = Infinity;
   private beautifyAt = Infinity;
-  private phase: 'drawn' | 'performing' | 'toPark' | 'parked' | 'toStage' | 'clip' | 'afterClip' = 'drawn';
+  private phase: 'drawn' | 'performing' | 'toPark' | 'parked' | 'toStage' | 'clip' | 'afterClip' | 'toVisit' | 'visiting' = 'drawn';
+  /** What it's saying (a speech bubble), in its own time. */
+  bubble: Bubble | null = null;
+  private trickKind: Trick | null = null;
+  private trickAt = -Infinity;
+  private visitTo: Pt | null = null;
+  private visitMs = 0;
   private readonly bornAt = new Date();
   private phaseAt = 0;
   private slot: Pt | null = null;
@@ -210,6 +221,56 @@ export class Doodle implements Creature {
   frozen = false;
   private moveFrom: { c: Pt; scale: number } | null = null;
 
+  /** Say something (a speech bubble), optionally a question with answers you can click. */
+  say(text: string, ms = 2800, options?: string[], onAnswer?: (o: string) => void): void {
+    this.bubble = { text, at: this.t, ms, options, onAnswer };
+  }
+  /** Do a little trick. */
+  trick(kind: Trick): void {
+    this.trickKind = kind;
+    this.trickAt = this.t;
+  }
+  /** Story: go over to `target` (wall px), stay a moment, come back to its place. */
+  visit(target: Pt, stayMs = 2600): boolean {
+    if (this.phase !== 'parked') return false;
+    const now = this.placement();
+    this.moveFrom = { c: now.c, scale: now.scale };
+    this.visitTo = { ...target };
+    this.visitMs = stayMs;
+    this.phase = 'toVisit';
+    this.phaseAt = this.t;
+    return true;
+  }
+  private bubbleLayout: BubbleLayout | null = null;
+  /** Its bubble, on top of everything (main draws these last). */
+  drawSpeech(ctx: CanvasRenderingContext2D, wall: { w: number; h: number }, hover: Pt | null): void {
+    if (!this.bubble || this.done || this.veil <= 0) { this.bubbleLayout = null; return; }
+    this.bubbleLayout = drawBubble(ctx, this.bubble, this.anchor(), wall, INK, this.t, hover);
+  }
+  /** A click on one of its bubble's answers: answer it. */
+  answerAt(p: Pt): boolean {
+    if (!this.bubble?.options || !this.bubbleLayout) return false;
+    const o = chipAt(this.bubbleLayout, p);
+    if (!o) return false;
+    const b = this.bubble;
+    this.bubble = null;
+    b.onAnswer?.(o);
+    return true;
+  }
+  get asking(): boolean { return !!this.bubble?.options; }
+  /** Is `p` over its question bubble (so pointing at an answer doesn't start the pen)? */
+  overBubble(p: Pt): boolean {
+    const L = this.bubbleLayout;
+    return !!L && !!this.bubble?.options && p.x > L.box.x - 40 && p.x < L.box.x + L.box.w + 40 && p.y > L.box.y - 40 && p.y < L.box.y + L.box.h + 40;
+  }
+
+  /** Resting in the composition (free for a story). */
+  get resting(): boolean { return this.phase === 'parked'; }
+  /** Where it is now (centre, wall px). */
+  get where(): Pt { return this.placement().c; }
+  /** Top centre of where it is now: where its bubble points. */
+  anchor(): Pt { const b = this.box(); return { x: b.x + b.w / 2, y: b.y }; }
+
   get what(): string { return this.label; }
   get how(): Motion | null { return this.motion; }
   get playingClip(): boolean { return this.phase === 'clip'; }
@@ -267,6 +328,14 @@ export class Doodle implements Creature {
   }
 
   update(dtMs: number): void {
+    if (this.bubble && this.t - this.bubble.at > this.bubble.ms) this.bubble = null;
+    if (this.trickKind && this.t - this.trickAt > TRICK_MS[this.trickKind]) this.trickKind = null;
+    if (this.phase === 'toVisit' && this.t - this.phaseAt > MOVE_MS) { this.phase = 'visiting'; this.phaseAt = this.t; }
+    else if (this.phase === 'visiting' && this.t - this.phaseAt > this.visitMs) {
+      this.moveFrom = { c: { ...this.visitTo! }, scale: this.slotScale };
+      this.phase = 'toPark';
+      this.phaseAt = this.t;
+    }
     this.t += dtMs;
     if (this.retireAt !== null) this.fade = Math.max(0, 1 - (this.t - this.retireAt) / RETIRE_MS);
     const since = this.t - this.phaseAt;
@@ -292,6 +361,8 @@ export class Doodle implements Creature {
       return { c: { x: f.c.x + (slot.x - f.c.x) * e, y: f.c.y + (slot.y - f.c.y) * e }, scale: f.scale + (s - f.scale) * e, energy: 1 };
     }
     if (this.phase === 'parked') return { c: slot, scale: s, energy: 0.3 };
+    if (this.phase === 'toVisit') { const f = this.moveFrom ?? { c: slot, scale: s }, v = this.visitTo!; return { c: { x: f.c.x + (v.x - f.c.x) * e, y: f.c.y + (v.y - f.c.y) * e }, scale: f.scale + (s - f.scale) * e, energy: 0.7 }; }
+    if (this.phase === 'visiting') return { c: this.visitTo!, scale: s, energy: 0.7 };
     if (this.phase === 'toStage') return { c: { x: slot.x + (this.home.x - slot.x) * e, y: slot.y + (this.home.y - slot.y) * e }, scale: s + (1 - s) * e, energy: 1 };
     return { c: this.home, scale: 1, energy: 1 };
   }
@@ -353,6 +424,14 @@ export class Doodle implements Creature {
     if (m === 'twinkle') { scale *= 1 + Math.sin(t / 260) * 0.06 * Math.max(wake, 0.3); rot = Math.sin(t / 1300) * 0.08 * wake; }
     if (m === 'hop') { const ph = (t / 800) % 1, land = Math.max(0, 1 - Math.abs(ph - 0.98) * 12); sy = 1 - 0.12 * land * performing; sx = 1 + 0.08 * land * performing; }
     if (this.phase === 'parked' && !this.frozen) scale *= 1 + Math.sin(this.t / 1200) * 0.015; // resting: a gentle breath
+    // a trick
+    if (this.trickKind && !this.frozen) {
+      const k = Math.min(1, (this.t - this.trickAt) / TRICK_MS[this.trickKind]);
+      if (this.trickKind === 'jump') bob -= Math.sin(Math.PI * k) * s * 0.45 * scale;
+      if (this.trickKind === 'spin') rot += Math.PI * 2 * (k * k * (3 - 2 * k));
+      if (this.trickKind === 'shake') rot += Math.sin((this.t - this.trickAt) / 35) * 0.16 * (1 - k);
+      if (this.trickKind === 'grow') scale *= 1 + 0.3 * Math.sin(Math.PI * k);
+    }
     const cos = Math.cos(rot), sin = Math.sin(rot);
     const pivotY = m === 'sway' ? Math.max(...(this.clean ? this.clean.flatMap((st) => st.pts.map((p) => p.y)) : this.strokes.flatMap((st) => st.base.map((p) => p.y)))) : 0;
     const put = (x0: number, y0: number): Pt => {
@@ -439,6 +518,18 @@ export class Doodle implements Creature {
       }
     }
     ctx.restore();
+    // rain, under a cloud
+    if (this.trickKind === 'rain') {
+      const b = this.box(), k = (this.t - this.trickAt) / TRICK_MS.rain;
+      ctx.save();
+      ctx.strokeStyle = INK; ctx.lineWidth = 2; ctx.lineCap = 'round';
+      ctx.globalAlpha = fade * Math.min(1, (1 - k) * 4);
+      for (let i = 0; i < 9; i++) {
+        const x = b.x + (b.w * (i + 0.5)) / 9, fall = (((this.t - this.trickAt) / 600 + i * 0.37) % 1) * b.h * 1.6;
+        ctx.beginPath(); ctx.moveTo(x, b.y + b.h + fall); ctx.lineTo(x - 2, b.y + b.h + fall + 10); ctx.stroke();
+      }
+      ctx.restore();
+    }
     // its name, briefly, in small light type
     const lt = this.t - this.aliveAt;
     if (this.label && this.label !== 'something' && lt > 0 && lt < LABEL_MS) {

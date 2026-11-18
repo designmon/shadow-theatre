@@ -85,10 +85,10 @@ Your hand is the pen, with three gestures:
 
 | Gesture | What happens |
 | --- | --- |
-| **Point one finger** and rest it a moment | a thin ring closes, a soft burst: the pen is on, at your fingertip |
-| **Move while pointing** | you draw. The newest bit of line glows blue → violet → pink, then settles into black ink. Your own line, smoothed as you go |
-| **Open your hand** | lifts the pen: move somewhere else, point again for the next stroke (eyes, whiskers…) |
-| **Close your hand into a fist** | done. (Pulling your hand out of the light also finishes) |
+| **Point one finger** and rest it a moment | a thin ring closes: the pen is on, at your fingertip |
+| **Move while pointing** | you draw. The ink trails your fingertip on a short string (a "lazy brush"), so a shaky hand still draws a steady line |
+| **Curl your finger** (make a fist) | the pen lifts: move somewhere else and **point again** for the next stroke (eyes, whiskers…) |
+| **Keep the fist closed** (about a second) | a ring fills, and the drawing is finished. (Pulling your hand out of the light also finishes) |
 
 When you finish, a clean drawing of what it is draws itself over your line and it moves the
 way that thing moves: a heart beats, a cat or dog walks, a bird flies, a fish swims. Then it goes
@@ -101,6 +101,14 @@ draw:
 
 The scene adds its own quiet details: grass by the plants, waves, and two far-off birds following
 a bird. Point at a drawing in the composition for half a second to wake it.
+
+**Stories.** Every so often the drawings play a little scene together, with a short caption under
+it: the bird visits the flower, the dog wants to play and the cat isn't impressed, a cloud rains
+on the flower and it grows, the sun wakes everyone up.
+
+**Click a drawing** (a quick fist over it, then open your hand): it asks you something, like the
+dog's *"Play with me? Fetch! / Nap"* or the flower's *"Water me?"*. Click an answer and it does
+it. When the app isn't sure what you drew, the drawing asks: *"Am I a cat or a dog?"*
 
 **The pause button** (top right of the wall): make a **fist over it and open your hand**, a
 quick click. Everything stops moving; click again to play. The **P** key does the same.

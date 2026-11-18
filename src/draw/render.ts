@@ -71,6 +71,18 @@ export function drawPen(ctx: CanvasRenderingContext2D, pen: PenState, tMs = perf
     ctx.beginPath(); ctx.arc(x, y, 12 + Math.sin(tMs / 260) * 0.8, 0, Math.PI * 2); ctx.stroke();
     if (pen.mode === 'down') { ctx.fillStyle = `rgba(${hue},1)`; ctx.beginPath(); ctx.arc(x, y, 4.5, 0, Math.PI * 2); ctx.fill(); }
   }
+  if (pen.brush && pen.mode === 'down' && Math.hypot(pen.brush.x - x, pen.brush.y - y) > 2) {
+    // the lazy brush's string: from the ink to your fingertip
+    ctx.strokeStyle = `rgba(${hue},0.45)`;
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(pen.brush.x, pen.brush.y); ctx.lineTo(x, y); ctx.stroke();
+  }
+  if (pen.finish > 0.12) {
+    // holding the fist: a ring fills; full = the drawing is finished
+    ctx.strokeStyle = `rgba(${accentAt(pen.finish)},0.95)`;
+    ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(x, y, 26, -Math.PI / 2, -Math.PI / 2 + ((pen.finish - 0.12) / 0.88) * Math.PI * 2); ctx.stroke();
+  }
   ctx.restore();
 }
 
@@ -95,6 +107,6 @@ export async function doodleToPng(strokes: Pt[][]): Promise<Blob> {
   const all = strokes.flat(), xs = all.map((p) => p.x), ys = all.map((p) => p.y);
   const x0 = Math.min(...xs), y0 = Math.min(...ys), w = Math.max(...xs) - x0, h = Math.max(...ys) - y0, size = Math.max(w, h, 1);
   const k = (S * 0.8) / size, ox = (S - w * k) / 2, oy = (S - h * k) / 2;
-  strokesOn(ctx, strokes, (p) => ({ x: ox + (p.x - x0) * k, y: oy + (p.y - y0) * k }), 10);
+  strokesOn(ctx, strokes, (p) => ({ x: ox + (p.x - x0) * k, y: oy + (p.y - y0) * k }), 12); // bold: clearer for the model
   return c.convertToBlob({ type: 'image/png' });
 }

@@ -45,6 +45,11 @@ export class WallButton {
     return false;
   }
 
+  /** Clicked (by the hand's click detector): toggle, with a flash. */
+  click(now: number): void {
+    this.on = !this.on;
+    this.flashAt = now;
+  }
   /** Is a hand over it (so the pen shouldn't start here)? */
   get hovered(): boolean { return this.hoverAt !== null; }
 

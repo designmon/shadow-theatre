@@ -167,3 +167,46 @@ export function pickFinger(hand: Hand, prevTip: Pt | null): Finger | null {
   const jump = Math.hypot(near.tip.x - prevTip.x, near.tip.y - prevTip.y);
   return jump < 2.5 * hand.palmR && near.length >= 0.8 * long[0].length ? near : long[0];
 }
+
+/**
+ * The fingertip, between pixels. The camera sees the wall coarsely (one camera pixel can be ten
+ * pixels on the wall), so a tip taken from whole pixels jumps about and the line wobbles. Walk
+ * along the finger in small steps over the camera picture (sampled smoothly) and find exactly
+ * where the shadow ends; centre it across the finger the same way.
+ * @param lit  how lit a point is, 0 (shadow) .. 1 (white wall), sampled between pixels
+ */
+export function refineTip(tip: Pt, dir: Pt, lit: (x: number, y: number) => number, width: number): Pt {
+  const w = Math.max(1.5, width);
+  const at = (s: number, o: number, n: Pt) => ({ x: tip.x + dir.x * s + n.x * o, y: tip.y + dir.y * s + n.y * o });
+  const across = { x: -dir.y, y: dir.x };
+  // along the finger: the last place it goes from shadow to lit
+  let end: number | null = null, prev = lit(at(-1.5 * w, 0, across).x, at(-1.5 * w, 0, across).y);
+  for (let s = -1.5 * w + 0.2; s <= 1.5 * w; s += 0.2) {
+    const p = at(s, 0, across), v = lit(p.x, p.y);
+    if (prev < 0.5 && v >= 0.5) end = s - 0.2 + (0.2 * (0.5 - prev)) / Math.max(1e-6, v - prev);
+    prev = v;
+  }
+  if (end === null) return tip;
+  // across the finger, a little behind the tip: centre between its two edges
+  const back = end - Math.min(0.8 * w, 3);
+  let left: number | null = null, right: number | null = null;
+  prev = lit(at(back, -2 * w, across).x, at(back, -2 * w, across).y);
+  for (let o = -2 * w + 0.2; o <= 2 * w; o += 0.2) {
+    const p = at(back, o, across), v = lit(p.x, p.y);
+    if (left === null && prev >= 0.5 && v < 0.5) left = o - 0.2 + (0.2 * (prev - 0.5)) / Math.max(1e-6, prev - v);
+    if (prev < 0.5 && v >= 0.5) right = o - 0.2 + (0.2 * (0.5 - prev)) / Math.max(1e-6, v - prev);
+    prev = v;
+  }
+  const mid = left !== null && right !== null && right > left ? (left + right) / 2 : 0;
+  return at(end, mid, across);
+}
+
+/** Smooth (bilinear) sampling of a picture. */
+export function bilinear(data: ArrayLike<number>, W: number, H: number, scale = 1): (x: number, y: number) => number {
+  return (x, y) => {
+    const fx = Math.min(W - 1.001, Math.max(0, x - 0.5)), fy = Math.min(H - 1.001, Math.max(0, y - 0.5));
+    const x0 = Math.floor(fx), y0 = Math.floor(fy), ax = fx - x0, ay = fy - y0, i = y0 * W + x0;
+    const v = data[i] * (1 - ax) * (1 - ay) + data[i + 1] * ax * (1 - ay) + data[i + W] * (1 - ax) * ay + data[i + W + 1] * ax * ay;
+    return v * scale;
+  };
+}

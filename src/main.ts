@@ -4,8 +4,11 @@ import { wallMask, warpMask } from './calibration/homography';
 import { debounce, MisalignmentWatch } from './calibration/watch';
 import { grabFrame, listCameras, saveCameraId, savedCameraId, startCamera } from './camera';
 import { litFrame } from './vision/light';
+import { bilinear } from './vision/fingers';
 import { compositionArea, drawDecor, layout, type Decor } from './draw/composition';
 import { pauseIcon, WallButton } from './ui/wallButton';
+import { Clicker } from './ui/clicker';
+import { Director, drawCaption } from './story/director';
 import { exportDrawing, exportScene } from './runway/export';
 import { ClipPlayer, watchClips, type ClipEvent } from './runway/clips';
 import { Checklist, describeHealth, type Health } from './setup/checklist';
@@ -48,7 +51,7 @@ const pen = new LaserPen();
 const sparkles = new Sparkles();
 /** Shadow-puppet recognition (hold a hand shape -> animal). Off while the fingertip pen is the focus. */
 const PUPPETS = false;
-let penState: PenState = { mode: 'idle', arm: 0, cursor: null, strokes: [] };
+let penState: PenState = { mode: 'idle', arm: 0, finish: 0, cursor: null, strokes: [] };
 let hovered: { d: Doodle; since: number; seen: number } | null = null;
 const sceneMemory: SceneMemory = {}; // where the arm comes in, kept between frames
 let lastTipCam: { x: number; y: number } | null = null; // the pen's finger last frame (camera px): stay on it
@@ -76,11 +79,26 @@ function compose(): void {
 
 // the stop button on the wall: make a fist over it and open your hand (or press P)
 const pauseButton = new WallButton(['pause', 'play'], pauseIcon);
+const clicker = new Clicker();
+// little stories between the drawings, and what a drawing does when you click it
+const director = new Director(() => creatures.filter((c): c is Doodle => c instanceof Doodle && !c.retiring), () => performance.now());
+let handAtWall: { x: number; y: number } | null = null; // where the hand is on the wall (fingertip, or palm for a fist)
 let fistFrames = 0;
 function setPaused(on: boolean): void {
-  pauseButton.on = on;
+  if (pauseButton.on !== on) pauseButton.click(performance.now());
   for (const c of creatures) if (c instanceof Doodle) c.frozen = on;
   say(on ? 'paused — the drawings rest' : 'playing');
+}
+
+/** How lit a camera point is (0 shadow .. 1 white wall), between pixels — for a precise fingertip. */
+function litSampler(frame: Gray, lit: Mask | null): (x: number, y: number) => number {
+  // the wall's brightness right now (the camera's exposure drifts): the 80th percentile on the lit wall
+  const hist = new Uint32Array(256);
+  let n = 0;
+  for (let i = 0; i < frame.data.length; i += 3) if (!lit || lit.data[i]) { hist[frame.data[i]]++; n++; }
+  let acc = 0, white = 255;
+  for (let v = 0; v < 256; v++) { acc += hist[v]; if (acc >= n * 0.8) { white = Math.max(40, v); break; } }
+  return bilinear(frame.data, frame.width, frame.height, 1 / white);
 }
 
 /** A finished fingertip drawing: appears as drawn, refines, is recognised and comes alive. */
@@ -98,6 +116,17 @@ function bringDrawingToLife(strokes: { x: number; y: number }[][]): void {
       lastRec = `drawing: ${rec.what} → ${motion}${rec.note ? ' — ' + rec.note : ''}`;
       doodle.comeAlive(motion, rec.what); // your own line, refined, with the motion that fits it
       compose(); // its place in the composition (it goes there after performing)
+      director.nudge(9000); // and soon a little scene with the others
+      // not sure what it is? it asks you (a quick fist on the answer)
+      const alts = (rec as { alternatives?: { what: string; p: number }[] }).alternatives ?? [];
+      if (rec.confidence < 0.55 && alts.length >= 2 && alts[1].p > 0.12) {
+        const options = [...new Set([rec.what, ...alts.map((a) => a.what)])].filter((w) => w !== 'something').slice(0, 2);
+        if (options.length === 2) setTimeout(() => director.askWhat(doodle, options, (what) => {
+          doodle.comeAlive(motionFor(what, rec.motion), what);
+          compose();
+          setTimeout(() => void exportDrawing(doodle), 1600);
+        }), 1800);
+      }
       // also save it for Runway (captures/runway-in/<id>.png + prompt), once the clean drawing is in
       setTimeout(() => void exportDrawing(doodle).then((id) => { if (id) matchClips(doodle); }), 1600);
     });
@@ -367,7 +396,7 @@ async function main() {
       const steady = creatures.length ? erode(projectedDarkInCamera(frame, false, true), 2) : null;
       const score = steady && countOnes(steady) >= 1000 ? alignmentScore(grabbed.luma, calib.whiteRef, steady, calib.dark) /* blue ink is dark in plain brightness */ : null;
       if (watch.push(score, now)) { status = 'projector moved — re-aligning'; calibrate(true); return; }
-      scene = analyzeScene(mask, findBlobs(mask), lit ? sceneLit(lit, projectedDarkInCamera(frame, true, false, false)) : undefined, penState.mode === 'idle' ? null : lastTipCam, sceneMemory);
+      scene = analyzeScene(mask, findBlobs(mask), lit ? sceneLit(lit, projectedDarkInCamera(frame, true, false, false)) : undefined, penState.mode === 'idle' ? null : lastTipCam, sceneMemory, litSampler(frame, lit));
       lastTipCam = scene ? { ...scene.tip } : null; // only on-wall panels hide the picture edge — a hand over a drawing still comes from the real edge
       if (scene) checklist.shadow('ok', 'seen — make a shape and hold it still', now);
       if (scene && lit) whyIgnored = usableReason(scene, own ?? { width: frame.width, height: frame.height, data: new Uint8Array(frame.data.length) }, lit);
@@ -404,19 +433,27 @@ async function main() {
       fistFrames = scene?.pose === 'fist' ? fistFrames + 1 : 0;
       // a fist is where its palm is (it has no fingertip); otherwise the fingertip
       const handAt = scene && calib ? (scene.pose === 'fist' && scene.palm ? applyH(calib.camToProj, scene.palm) : tipProj) : null;
-      if (penFree && pauseButton.feed(handAt, fistFrames >= 2, stage.size(), now)) {
-        setPaused(pauseButton.on);
-        const c = pauseButton.centre(stage.size());
-        sparkles.burst(c, 10, 60);
+      handAtWall = handAt;
+      pauseButton.feed(handAt, false, stage.size(), now); // hover look only; clicks come from the clicker
+      const click = penFree ? clicker.feed(handAt, fistFrames >= 2, now) : null;
+      if (click) {
+        // a click (quick fist): the pause button, an answer in a bubble, or a drawing
+        const wall = stage.size(), ds = doodles();
+        if (pauseButton.hit(click, wall)) { setPaused(!pauseButton.on); sparkles.burst(pauseButton.centre(wall), 10, 60); }
+        else if (ds.some((d) => d.answerAt(click))) sparkles.burst(click, 8, 50);
+        else {
+          const d = ds.filter((x) => !x.retiring && x.what && x.hit(click)).sort((a, b) => Math.hypot(a.where.x - click.x, a.where.y - click.y) - Math.hypot(b.where.x - click.x, b.where.y - click.y))[0];
+          if (d) { director.clicked(d); sparkles.burst(d.anchor(), 8, 40); }
+        }
       }
-      const atButton = penFree && pauseButton.hovered;
+      const atButton = penFree && (pauseButton.hovered || (!!handAt && doodles().some((d) => d.overBubble(handAt))));
       penState = pen.update(tipProj && scene && !resting && !atButton ? { tip: tipProj, pose: scene.pose, dir: dirProj } : null, now);
       const finished = pen.takeFinished();
       if (finished) bringDrawingToLife(finished);
       for (const b of pen.takeBursts()) sparkles.burst(b.at, b.kind === 'finish' ? 16 : 10, b.kind === 'finish' ? 140 : 70);
       if (penState.mode === 'down' && penState.cursor) sparkles.trail(penState.cursor, dt); else sparkles.lift();
       if (scene?.pointing) lastPointingAt = now;
-      if ((window as any).__trace) { (window as any).__mask = mask; (window as any).__lit = lit; (window as any).__handSeen = !!scene; (window as any).__doodles = doodles; (window as any).__wallClip = () => wallClip; (window as any).__paused = () => pauseButton.on; (window as any).__btn = () => ({ tip: scene?.pose === 'fist' && scene.palm && calib ? applyH(calib.camToProj, scene.palm) : rawTip, hov: pauseButton.hovered, c: pauseButton.centre(stage.size()), pose: scene?.pose, fistFrames }); }
+      if ((window as any).__trace) { (window as any).__mask = mask; (window as any).__lit = lit; (window as any).__handSeen = !!scene; (window as any).__doodles = doodles; (window as any).__wallClip = () => wallClip; (window as any).__paused = () => pauseButton.on; (window as any).__caption = () => director.caption; (window as any).__btn = () => ({ tip: scene?.pose === 'fist' && scene.palm && calib ? applyH(calib.camToProj, scene.palm) : rawTip, hov: pauseButton.hovered, c: pauseButton.centre(stage.size()), pose: scene?.pose, fistFrames }); }
       if ((window as any).__trace) console.log('[trace]', Math.round(now), scene ? `pointing=${scene.pointing} tip=${Math.round(scene.tip.x)},${Math.round(scene.tip.y)} box=${JSON.stringify(scene.puppetBox)} usable=${!!usable}` : 'no scene', penState.mode, scene?.pose ?? '');
       const penNearby = penState.mode !== 'idle' || now - lastPointingAt < POINTING_QUIET_MS;
       if (penNearby) hold.reset(); // a pointing finger is a pen, not a puppet
@@ -446,6 +483,7 @@ async function main() {
     const alive = creatures.filter((c) => !c.retiring);
     for (let i = 0; i < alive.length - MAX_CREATURES; i++) alive[i].retire();
     for (const c of creatures) c.update(dt);
+    director.update(pauseButton.on);
     sparkles.update(dt);
     let gone = false;
     for (let i = creatures.length - 1; i >= 0; i--) if (creatures[i].done) { creatures.splice(i, 1); gone = true; }
@@ -474,6 +512,8 @@ async function main() {
     if (decor) drawDecor(stage.ctx, decor, INK_COLOR, pauseButton.on ? 0 : now, veil);
     for (const c of creatures) c.draw(stage.ctx);
     pauseButton.draw(stage.ctx, stage.size(), INK_COLOR, accentAt, now);
+    for (const d of doodles()) d.drawSpeech(stage.ctx, stage.size(), handAtWall);
+    { const area = compositionArea(stage.size()); drawCaption(stage.ctx, director.caption, area.x + area.w / 2, Math.min(stage.size().h - 14, area.y + area.h + 26), INK_COLOR, now); }
     if (note) {
       const a = Math.min(1, (now - note.at) / 250) * Math.min(1, (3200 - (now - note.at)) / 500);
       if (a <= 0) note = null;

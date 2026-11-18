@@ -1,6 +1,6 @@
 import type { Box, Mask, Pt, Side } from '../types';
 import type { Blob } from './blobs';
-import { findFingers, longFingers, pickFinger } from './fingers';
+import { findFingers, longFingers, pickFinger, refineTip } from './fingers';
 
 /** neck: cross-width of the shadow just behind the puppet / the puppet's cross-width (null if nothing behind it). */
 /** pointing: one thin finger sticking out (laser drawing); tip: its fingertip; tipDir: which way it points. */
@@ -31,7 +31,7 @@ function boxOf(indices: Iterable<number>, W: number): Box | null {
 /** Remembered between frames: where the arm comes in (it doesn't jump; a hand touching another edge later shouldn't move it). */
 export type SceneMemory = { entry?: Pt; seenAt?: number };
 
-export function analyzeScene(mask: Mask, blobs: Blob[], lit?: Mask, prevTip?: Pt | null, memory?: SceneMemory): Scene | null {
+export function analyzeScene(mask: Mask, blobs: Blob[], lit?: Mask, prevTip?: Pt | null, memory?: SceneMemory, litAt?: (x: number, y: number) => number): Scene | null {
   const blob = blobs[0];
   if (!blob) return null;
   const { width: W, height: H } = mask;
@@ -198,7 +198,7 @@ export function analyzeScene(mask: Mask, blobs: Blob[], lit?: Mask, prevTip?: Pt
     if (long.length) {
       const f = pickFinger(handShape, prevTip ?? null)!;
       pose = long.length === 1 ? 'point' : 'open';
-      finger.tip = f.tip;
+      finger.tip = litAt ? refineTip(f.tip, f.dir, litAt, f.width) : f.tip; // between pixels: a steady line
       finger.tipDir = f.dir;
       finger.pointing = pose === 'point';
     } else {

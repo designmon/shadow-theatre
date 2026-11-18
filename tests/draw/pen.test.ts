@@ -50,11 +50,23 @@ describe('LaserPen with gestures', () => {
     expect(s.strokes[1][0].x).toBeGreaterThan(650); // no ink where the hand moved while open
   });
 
-  it('a fist finishes the drawing and hands it over once, with a burst', () => {
+  it('curl the finger (a fist) to lift the pen, point again for a new stroke (eyes!)', () => {
+    const pen = new LaserPen();
+    run(pen, 0, 600, () => ({ x: 500, y: 300 }));
+    run(pen, 633, 1600, arc(633, 500));
+    const up = run(pen, 1633, 2200, (t) => ({ x: 700 + (t - 1633) * 0.2, y: 200 }), 'fist'); // curled, moving to the eyes
+    expect(up.mode).toBe('up');
+    expect(up.finish).toBeGreaterThan(0);
+    const s = run(pen, 2233, 2800, (t) => ({ x: 820 + (t - 2233) * 0.05, y: 200 }));
+    expect(s.mode).toBe('down');
+    expect(s.strokes.length).toBe(2);
+    expect(Math.max(...s.strokes[0].map((p) => p.x))).toBeLessThan(700); // nothing drawn while curled
+  });
+  it('holding the fist finishes the drawing and hands it over once, with a burst', () => {
     const pen = new LaserPen();
     run(pen, 0, 600, () => ({ x: 500, y: 300 }));
     run(pen, 633, 2000, arc(633, 500));
-    const s = run(pen, 2033, 2700, () => ({ x: 700, y: 310 }), 'fist');
+    const s = run(pen, 2033, 3600, () => ({ x: 700, y: 310 }), 'fist');
     expect(s.mode).toBe('idle');
     const done = pen.takeFinished()!;
     expect(done.length).toBe(1);
@@ -98,5 +110,16 @@ describe('LaserPen with gestures', () => {
       run(pen, t0 + 200, t0 + 380, arc(633, 500), 'open'); // ~200 ms of "open" at a time
     }
     expect(pen.update({ tip: arc(633, 500)(2633), pose: 'point' }, 2633).strokes.length).toBe(1);
+  });
+  it('a shaky fingertip draws a steady line (lazy brush)', () => {
+    const pen = new LaserPen();
+    run(pen, 0, 600, () => ({ x: 400, y: 300 }));
+    let k = 0;
+    const shaky = (t: number) => ({ x: 400 + (t - 633) * 0.3, y: 300 + ((k++ * 7919) % 13) - 6 }); // ±6 px tremor
+    const s = run(pen, 633, 2600, shaky);
+    const ys = s.strokes[0].slice(3).map((p) => p.y);
+    const wobble = Math.max(...ys) - Math.min(...ys);
+    expect(wobble).toBeLessThan(5); // the tremor was 12 px peak to peak
+    expect(Math.max(...s.strokes[0].map((p) => p.x))).toBeGreaterThan(900); // and it still goes where you point
   });
 });

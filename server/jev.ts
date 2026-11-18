@@ -131,7 +131,7 @@ const DOODLE_MOTIONS = {
   twinkle: 'It twinkles or sparkles: star, diamond, a sparkle.',
   spin: 'It turns slowly: sun, wheel, spiral, flower head.',
 };
-export type DoodleRecognition = { what: string; motion: keyof typeof DOODLE_MOTIONS; confidence: number; note?: string };
+export type DoodleRecognition = { what: string; motion: keyof typeof DOODLE_MOTIONS; confidence: number; note?: string; alternatives?: { what: string; p: number }[] };
 
 /** "What did they draw, and how would it move?" — one fast Jev request. Never throws. */
 export async function recognizeDoodleWithJev(png: Buffer, apiKey: string, fetchFn: typeof fetch = fetch, model = MODEL): Promise<DoodleRecognition> {
@@ -143,7 +143,7 @@ export async function recognizeDoodleWithJev(png: Buffer, apiKey: string, fetchF
       signal: AbortSignal.timeout(TIMEOUT_MS),
       body: JSON.stringify({
         model,
-        state: ['A simple line drawing made with a fingertip on a wall (black lines on white). It may be rough.', { type: 'image_url', image_url: { url: `data:image/png;base64,${png.toString('base64')}` } }],
+        state: ['A simple line drawing made with a fingertip on a wall (black lines on white). It is rough and wobbly, like a child\'s doodle: judge the overall shape and its key features (ears, wings, tail, petals, wheels, roof), not the line quality.', { type: 'image_url', image_url: { url: `data:image/png;base64,${png.toString('base64')}` } }],
         questions: {
           what: { type: 'choice', instructions: 'What does this drawing most look like?', criteria: DOODLE_HINTS },
           motion: { type: 'choice', instructions: 'If this drawing came alive, how would it move?', criteria: DOODLE_MOTIONS },
@@ -154,8 +154,11 @@ export async function recognizeDoodleWithJev(png: Buffer, apiKey: string, fetchF
     const { answers } = await res.json();
     const what = answers?.what?.choice ?? 'something';
     const motion = (answers?.motion?.choice in DOODLE_MOTIONS ? answers.motion.choice : 'float') as DoodleRecognition['motion'];
-    const confidence = answers?.what?.probabilities?.[what] ?? answers?.what?.confidence ?? 0;
-    return { what, motion, confidence };
+    const probs: Record<string, number> = answers?.what?.probabilities ?? {};
+    const confidence = probs[what] ?? answers?.what?.confidence ?? 0;
+    // the runner-up guesses: when it isn't sure, the drawing asks you (cat or dog?)
+    const alternatives = Object.entries(probs).filter(([k]) => k !== 'something').map(([k, p]) => ({ what: k, p: Number(p) || 0 })).sort((a, b) => b.p - a.p).slice(0, 3);
+    return { what, motion, confidence, alternatives };
   } catch (err) {
     return fallback(`${model} unreachable: ${err instanceof Error ? err.message : err}`);
   }

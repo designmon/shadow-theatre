@@ -299,3 +299,20 @@ describe('a thin arm between the body and the fist', () => {
     expect(analyzeScene(m, findBlobs(m), lit)!.pose).toBe('fist');
   });
 });
+
+import { bilinear, refineTip } from '../../src/vision/fingers';
+
+describe('fingertip between pixels', () => {
+  it('finds where the finger ends to a fraction of a camera pixel', () => {
+    // a finger pointing right, its true end at x = 60.4, centred at y = 30.3; pixels cover partially
+    const W = 100, H = 60, img = new Float32Array(W * H);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const cover = (a0: number, a1: number, b0: number, b1: number) => Math.max(0, Math.min(a1, b1) - Math.max(a0, b0));
+      const inside = cover(x, x + 1, 0, 60.4) * cover(y, y + 1, 27.3, 33.3); // finger: 6 px wide
+      img[y * W + x] = 1 - inside; // lit = 1, shadow = 0
+    }
+    const tip = refineTip({ x: 60, y: 30 }, { x: 1, y: 0 }, bilinear(img, W, H), 6);
+    expect(Math.abs(tip.x - 60.4)).toBeLessThan(0.3);
+    expect(Math.abs(tip.y - 30.3)).toBeLessThan(0.3);
+  });
+});
