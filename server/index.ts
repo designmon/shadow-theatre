@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { createServer } from 'node:http';
 import { saveCalibrationFrames, saveCapture, saveDoodle } from './captures';
 import { ClipWatcher, saveRunwayInput, serveClip, streamClipEvents, type RunwayExport } from './runway';
+import { RunwayGenerator } from './runwayApi';
 import { handleHealth, type HealthClient } from './health';
 import { jevHealth, MODEL, recognizeDoodleWithJev, recognizeWithJev } from './jev';
 import { CLIENT_OPTIONS, handleRecognize, UNKNOWN, type RecognizeClient } from './recognize';
@@ -24,6 +25,9 @@ try {
 }
 
 const clips = new ClipWatcher();
+// Runway phase 2: automatic with RUNWAYML_API_SECRET (server only); without it, the manual round-trip
+const runway = RunwayGenerator.fromEnv();
+console.log(runway ? `runway: automatic via the API (${runway.model}, up to ${runway.dailyCap} a day, ${runway.usedToday()} used today)` : 'runway: manual (set RUNWAYML_API_SECRET to generate automatically)');
 clips.start();
 clips.onClip((f) => console.log(`[runway] clip ready: captures/runway-out/${f}`));
 
@@ -47,13 +51,14 @@ createServer(async (req, res) => {
     try {
       const name = saveRunwayInput(JSON.parse(Buffer.concat(chunks).toString('utf8')) as RunwayExport);
       console.log(`[runway] saved captures/runway-in/${name}.png + .txt`);
-      return json({ ok: true, name });
+      if (runway) void runway.generate(name); // phase 2: off to Runway; the clip lands in runway-out/
+      return json({ ok: true, name, auto: !!runway });
     } catch (err) {
       res.writeHead(400).end(String(err instanceof Error ? err.message : err));
       return;
     }
   }
-  if (req.method === 'GET' && req.url === '/api/runway/events') return streamClipEvents(req, res, clips);
+  if (req.method === 'GET' && req.url === '/api/runway/events') return streamClipEvents(req, res, clips, runway ?? undefined);
   if (req.method === 'GET' && req.url?.startsWith('/api/runway/out/')) return serveClip(req, res, decodeURIComponent(req.url.slice('/api/runway/out/'.length).split('?')[0]));
   if (req.method === 'POST' && req.url?.startsWith('/api/calibration')) {
     const chunks: Buffer[] = [];

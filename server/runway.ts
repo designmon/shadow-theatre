@@ -88,13 +88,15 @@ export class ClipWatcher {
 }
 
 /** Server-Sent Events: the current clips on connect, then each new one. */
-export function streamClipEvents(req: IncomingMessage, res: ServerResponse, watcher: ClipWatcher): void {
+export function streamClipEvents(req: IncomingMessage, res: ServerResponse, watcher: ClipWatcher, status?: { onStatus(f: (s: object) => void): () => void }): void {
   res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
   const send = (file: string, initial: boolean) => res.write(`data: ${JSON.stringify({ file, initial, url: `/api/runway/out/${encodeURIComponent(file)}?v=${watcher.version(file)}` })}\n\n`);
   for (const f of watcher.clips) send(f, true); // already there: known, but not news
   const off = watcher.onClip((f) => send(f, false));
+  // phase 2: a clip being generated for a drawing (it shimmers), or a failure (it doesn't)
+  const offStatus = status?.onStatus((s) => res.write(`data: ${JSON.stringify(s)}\n\n`));
   const ping = setInterval(() => res.write(': ping\n\n'), 15000);
-  req.on('close', () => { off(); clearInterval(ping); });
+  req.on('close', () => { off(); offStatus?.(); clearInterval(ping); });
 }
 
 /** Serve a clip, with range requests (video seeking). */

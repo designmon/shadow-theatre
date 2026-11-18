@@ -98,7 +98,7 @@ Draw a butterfly and a flower, press E, generate in Runway, drop the clips in, a
 drawings. The Runway versions play on the wall in blue with no false shadows, and R still
 records.
 
-## Phase 2: automatic via the Runway API (planned, not built)
+## Phase 2: automatic via the Runway API (built 2026-11-18)
 
 - `server/runway.ts` gains `generate(id)`. After the phase-1 export it uploads `<id>.png` and
   `<id>.txt` to Runway image-to-video, polls the task, and downloads the result into
@@ -114,3 +114,21 @@ records.
 - Failures are logged on the server and never shown as errors on the wall. The drawing simply
   keeps its built-in animation.
 - Cost guard: one generation per drawing, scenes only on E, and a daily cap in an env var.
+
+### As built
+
+- `server/runwayApi.ts` uses the official `@runwayml/sdk` (4.28): `imageToVideo.create(...)`
+  followed by `.waitForTaskOutput()`, with a 10-minute timeout. Its errors (`TaskFailedError`,
+  `TaskTimedOutError`) are logged and announced. Nothing is resubmitted automatically.
+- The request is `{ model, promptImage: data URI, promptText (≤1000 chars), ratio: '1280:720',
+  duration }`. Veo models take 4/6/8 s; the rest take 5. These are checked against the SDK's types
+  because the docs site wasn't reachable from the build machine.
+- The signed output URL expires, so the clip is downloaded to `.<id>.mp4.part` and renamed into
+  `captures/runway-out/` when complete. The phase-1 watcher announces it.
+- The page hears `{pending}` and `{failed}` on the same event stream. A drawing shimmers while
+  pending. When its clip lands, `revealClip` plays it from wherever the drawing is: resting (it
+  rises first), on stage (straight away), or walking to its place (once it gets there). It fades
+  in over 2.2 s.
+- The daily cap is kept in `captures/runway-in/.runway-generations.json`.
+- Verified with mocked SDK tests, plus a simulator run where the real SDK talks to a local fake
+  API through `RUNWAYML_BASE_URL`. No live generations were made.

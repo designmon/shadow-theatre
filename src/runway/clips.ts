@@ -68,12 +68,17 @@ export class ClipPlayer {
 }
 
 export type ClipEvent = { file: string; url: string; initial: boolean };
+/** Phase 2: a clip being generated for an export (the drawing shimmers), or a failure. */
+export type RunwayStatus = { pending: string } | { failed: string; why: string };
 
 /** Clips dropped into captures/runway-out/, as the server announces them. */
-export function watchClips(onClip: (e: ClipEvent) => void): () => void {
+export function watchClips(onClip: (e: ClipEvent) => void, onStatus: (s: RunwayStatus) => void = () => {}): () => void {
   const es = new EventSource('/api/runway/events');
   es.onmessage = (m) => {
-    try { onClip(JSON.parse(m.data) as ClipEvent); } catch { /* ignore */ }
+    try {
+      const msg = JSON.parse(m.data);
+      if (msg.file) onClip(msg as ClipEvent); else onStatus(msg as RunwayStatus);
+    } catch { /* ignore */ }
   };
   return () => es.close();
 }

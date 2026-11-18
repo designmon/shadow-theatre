@@ -20,6 +20,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.8.0",
+    "@runwayml/sdk": "^4.28.0",
     "zod": "^4.6.7"
   }
 }

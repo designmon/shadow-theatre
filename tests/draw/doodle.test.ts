@@ -150,3 +150,32 @@ describe('Doodle with a Runway clip', () => {
     expect(d.playingClip).toBe(false);
   });
 });
+
+describe('Doodle: a clip that just arrived from Runway (phase 2)', () => {
+  const circle = Array.from({ length: 60 }, (_, i) => ({ x: 600 + Math.cos((i / 60) * Math.PI * 2) * 80, y: 300 + Math.sin((i / 60) * Math.PI * 2) * 80 }));
+  const clip = () => ({ started: 0, ended: false, remainingMs: 4000, start() { this.started++; }, draw() {} });
+  it('resting: it comes back up and plays it by itself', () => {
+    const d = new Doodle([circle], { w: 1280, h: 720 });
+    d.comeAlive('fly', 'butterfly');
+    d.park({ x: 1200, y: 680 }, 0.4);
+    d.runwayFit = fitForExport(d.restShape());
+    d.pending = true;
+    for (let t = 0; t < 8000; t += 50) d.update(50);
+    expect(d.parked).toBe(true);
+    const c = clip();
+    d.revealClip(c);
+    expect(d.pending).toBe(false);
+    for (let t = 0; t < 1900; t += 50) d.update(50);
+    expect(d.playingClip).toBe(true);
+    expect(c.started).toBe(1);
+  });
+  it('still performing: the clip takes over right there', () => {
+    const d = new Doodle([circle], { w: 1280, h: 720 });
+    d.comeAlive('fly', 'butterfly');
+    d.runwayFit = fitForExport(d.restShape());
+    for (let t = 0; t < 1000; t += 50) d.update(50);
+    d.revealClip(clip());
+    d.update(50);
+    expect(d.playingClip).toBe(true);
+  });
+});

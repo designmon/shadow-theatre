@@ -103,7 +103,14 @@ watchClips((e) => {
     return;
   }
   const d = doodles().find((x) => x.id && e.file.includes(x.id));
-  if (d) { d.attachClip(new ClipPlayer(e.url)); say(`Runway clip ready — point at the ${d.what || 'drawing'}`); }
+  if (!d) return;
+  if (d.pending && !e.initial) d.revealClip(new ClipPlayer(e.url)); // made by the API just now: it comes alive by itself
+  else { d.attachClip(new ClipPlayer(e.url)); say(`Runway clip ready — point at the ${d.what || 'drawing'}`); }
+}, (s) => {
+  // phase 2 (RUNWAYML_API_SECRET on the server): generating → a shimmer; failed → it just stops
+  const name = 'pending' in s ? s.pending : s.failed;
+  const d = doodles().find((x) => x.id && name === x.id);
+  if (d) d.pending = 'pending' in s;
 });
 function playScene(e: ClipEvent): void {
   const player = new ClipPlayer(e.url);

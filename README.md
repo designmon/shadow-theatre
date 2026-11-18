@@ -151,8 +151,29 @@ them for shadows. White becomes see-through, so other drawings show through.
 
 Clips match drawings made since the page was opened. A reload starts a fresh wall.
 
-Phase 2 (automatic, via the Runway API with `RUNWAYML_API_SECRET`) is planned in
-`docs/superpowers/specs/2026-11-18-runway-design.md`.
+**Phase 2 (automatic, with Runway API credits).** Create an API key in the Runway Developer
+Portal and add it to the server's environment, in the same place as your other keys (never in
+the browser):
+
+```bash
+echo 'export RUNWAYML_API_SECRET="PASTE_KEY_HERE"' >> ~/.zshrc
+```
+
+Then every recognised drawing is sent to Runway on its own:
+- While Runway works (tens of seconds), the drawing keeps its own animation and a faint shimmer
+  runs along its line.
+- When the clip arrives, the drawing comes back up by itself and the clip fades in slowly.
+- **E** sends the whole wall too.
+- If a generation fails, the drawing keeps its own animation, and the reason is logged in the
+  terminal.
+
+Options (all optional, in the server's environment):
+- `RUNWAY_MODEL`: default `gen4_turbo`. Others in the SDK include `gen4.5`, `veo3.1` and
+  `veo3.1_fast`.
+- `RUNWAY_DURATION`: in seconds. The default is 5, or 4 for Veo.
+- `RUNWAY_DAILY_CAP`: default 20 generations a day, counted across restarts.
+
+Each generation uses API credits.
 
 ## Try it without a projector
 
