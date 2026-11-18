@@ -30,7 +30,7 @@ export class LaserPen {
   private times: number[][] = [];
   private finished: Pt[][] | null = null;
   private bursts: Burst[] = [];
-  private filt = new OneEuro2D(1.2, 0.02);
+  private filt = new OneEuro2D(1.5, 0.035);
   private dir: Pt | null = null;
   private lastTip: Pt | null = null;
   private anchor: Pt | null = null; // where arming started
@@ -55,7 +55,7 @@ export class LaserPen {
 
     switch (this.mode) {
       case 'idle':
-        if (tip && input!.pose === 'point') { this.mode = 'arming'; this.since = tMs; this.anchor = { ...tip }; this.filt = new OneEuro2D(1.2, 0.02); this.cursor = this.filt.filter(tip, tMs); }
+        if (tip && input!.pose === 'point') { this.mode = 'arming'; this.since = tMs; this.anchor = { ...tip }; this.filt = new OneEuro2D(1.5, 0.035); this.cursor = this.filt.filter(tip, tMs); }
         break;
       case 'arming':
         if (!tip || input!.pose !== 'point') { if (!tip ? tMs - this.lastSeen > 250 : true) this.reset(); break; }

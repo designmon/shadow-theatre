@@ -232,3 +232,70 @@ describe('hand pose: point (draw), fist (finish), open (pen lifted)', () => {
     expect(pose(m)).toBe('open');
   });
 });
+
+describe('fingertip by shape (the pen stays on the finger)', () => {
+  const lit = fillRect(mask(W, H), 20, 20, 280, 200, 1);
+  const armAndPalm = () => {
+    const m = mask(W, H);
+    fillRect(m, 20, 112, 90, 14, 1); // forearm from the left edge
+    fillRect(m, 105, 96, 44, 40, 1); // a big palm
+    return m;
+  };
+  it('a finger pointing back toward the arm: the pen is its tip, not the far side of the palm', () => {
+    const m = armAndPalm();
+    fillRect(m, 76, 90, 30, 8, 1); // index finger pointing back left, above the forearm
+    const s = analyzeScene(m, findBlobs(m), lit)!;
+    expect(s.pose).toBe('point');
+    expect(s.tip.x).toBeLessThan(84);
+    expect(s.tip.y).toBeGreaterThan(88);
+    expect(s.tip.y).toBeLessThan(100);
+  });
+  it('pointing with the thumb out: still the index fingertip', () => {
+    const m = armAndPalm();
+    fillRect(m, 149, 104, 42, 9, 1); // index finger
+    fillRect(m, 128, 136, 9, 13, 1); // thumb, shorter
+    const s = analyzeScene(m, findBlobs(m), lit)!;
+    expect(s.pose).toBe('point');
+    expect(s.tip.x).toBeGreaterThan(184);
+  });
+  it('an open hand, fingers spread: open (pen lifted)', () => {
+    const m = armAndPalm();
+    for (const y of [92, 104, 116, 128]) fillRect(m, 149, y, 36, 7, 1);
+    expect(analyzeScene(m, findBlobs(m), lit)!.pose).toBe('open');
+  });
+  it('stays on the finger it was on when another appears', () => {
+    const m = armAndPalm();
+    fillRect(m, 149, 100, 40, 8, 1); // index
+    fillRect(m, 149, 124, 38, 8, 1); // a second finger, nearly as long
+    const first = analyzeScene(m, findBlobs(m), lit)!;
+    expect(first.pose).toBe('open');
+    const kept = analyzeScene(m, findBlobs(m), lit, { x: 186, y: 128 })!;
+    expect(kept.tip.y).toBeGreaterThan(120); // near the previous tip
+  });
+});
+
+describe('a hand touching another edge of the picture', () => {
+  const lit = fillRect(mask(W, H), 20, 20, 280, 200, 1);
+  it('the arm (the biggest contact) is where it comes in; a fist touching the top edge is still the hand', () => {
+    const m = mask(W, H);
+    fillRect(m, 20, 150, 150, 16, 1); // forearm from the left edge
+    fillRect(m, 160, 40, 16, 120, 1); // up toward the top
+    const memory = {};
+    analyzeScene(m, findBlobs(m), lit, null, memory); // the arm reaches in first
+    fillRect(m, 150, 20, 36, 30, 1); // then a fist touches the top edge (a wider contact than the arm's)
+    const s = analyzeScene(m, findBlobs(m), lit, null, memory)!;
+    expect(s.tip.y).toBeLessThan(60);
+    expect(s.tip.x).toBeGreaterThan(140);
+  });
+});
+
+describe('a thin arm between the body and the fist', () => {
+  const lit = fillRect(mask(W, H), 20, 20, 280, 200, 1);
+  it('is not a finger: a fist stays a fist', () => {
+    const m = mask(W, H);
+    fillRect(m, 20, 120, 60, 100, 1); // body at the left edge
+    fillRect(m, 80, 150, 120, 9, 1); // a thin arm
+    fillRect(m, 200, 136, 36, 36, 1); // a fist
+    expect(analyzeScene(m, findBlobs(m), lit)!.pose).toBe('fist');
+  });
+});

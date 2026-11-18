@@ -194,9 +194,21 @@ export class Doodle implements Creature {
 
   /** Where it rests after performing (its place in the row), and how small. */
   park(slot: Pt, scale: number): void {
+    const moved = !this.slot || Math.hypot(slot.x - this.slot.x, slot.y - this.slot.y) > 1 || Math.abs(scale - this.slotScale) > 0.01;
+    if (moved && (this.phase === 'parked' || this.phase === 'toPark')) {
+      // its place in the composition changed: glide there from where it is now
+      const now = this.placement();
+      this.moveFrom = { c: now.c, scale: now.scale };
+      this.phase = 'toPark';
+      this.phaseAt = this.t;
+    }
     this.slot = { ...slot };
     this.slotScale = scale;
   }
+
+  /** Paused (the stop button): no movement of its own; it still goes to its place. */
+  frozen = false;
+  private moveFrom: { c: Pt; scale: number } | null = null;
 
   get what(): string { return this.label; }
   get how(): Motion | null { return this.motion; }
@@ -223,7 +235,7 @@ export class Doodle implements Creature {
   /** The shape it rests as (local coords): the clean drawing if there is one, else your refined line. */
   restShape(): Shape[] {
     if (this.clean) return this.clean.map((st) => ({ pts: st.pts, closed: !!st.closed, fill: !!st.fill }));
-    const single = this.strokes.length === 1 && this.strokes[0].closed;
+    const single = false; // your own lines stay lines (only clean drawings, like the heart, are filled)
     return this.strokes.map((st) => ({ pts: st.base.map((b, i) => (st.ideal ? { x: b.x + (st.ideal[i].x - b.x) * 0.6, y: b.y + (st.ideal[i].y - b.y) * 0.6 } : b)), closed: st.closed, fill: single }));
   }
 
@@ -232,7 +244,7 @@ export class Doodle implements Creature {
     const f = this.frame(), k = this.redrawK(), { scale } = this.placement();
     const lineWidth = Math.max(3.5, INK_W * Math.sqrt(scale));
     if (this.clean && k >= 1) return { shapes: f.clean.map((pts, i) => ({ pts, closed: !!this.clean![i].closed, fill: !!this.clean![i].fill })), lineWidth };
-    const single = this.strokes.length === 1 && this.strokes[0].closed;
+    const single = false;
     return { shapes: f.user.map((pts, i) => ({ pts, closed: this.strokes[i].closed, fill: single })), lineWidth };
   }
 
@@ -258,8 +270,8 @@ export class Doodle implements Creature {
     this.t += dtMs;
     if (this.retireAt !== null) this.fade = Math.max(0, 1 - (this.t - this.retireAt) / RETIRE_MS);
     const since = this.t - this.phaseAt;
-    if (this.phase === 'performing' && this.slot && since > PERFORM_MS) { this.phase = 'toPark'; this.phaseAt = this.t; }
-    else if (this.phase === 'toPark' && since > MOVE_MS) { this.phase = 'parked'; this.phaseAt = this.t; if (this.clipQueued) { this.clipQueued = false; this.wake(); } }
+    if (this.phase === 'performing' && this.slot && since > (this.frozen ? 600 : PERFORM_MS)) { this.phase = 'toPark'; this.phaseAt = this.t; this.moveFrom = null; }
+    else if (this.phase === 'toPark' && since > MOVE_MS) { this.phase = 'parked'; this.phaseAt = this.t; this.moveFrom = null; if (this.clipQueued) { this.clipQueued = false; this.wake(); } }
     else if (this.phase === 'toStage' && since > MOVE_MS) {
       // back on stage: its Runway clip if it has one, else the built-in animation
       this.phase = this.clip && this.runwayFit ? 'clip' : 'performing';
@@ -275,7 +287,10 @@ export class Doodle implements Creature {
   private placement(): { c: Pt; scale: number; energy: number } {
     const since = this.t - this.phaseAt, k = Math.min(1, since / MOVE_MS), e = k * k * (3 - 2 * k);
     const slot = this.slot ?? this.home, s = this.slotScale;
-    if (this.phase === 'toPark') return { c: { x: this.home.x + (slot.x - this.home.x) * e, y: this.home.y + (slot.y - this.home.y) * e }, scale: 1 + (s - 1) * e, energy: 1 };
+    if (this.phase === 'toPark') {
+      const f = this.moveFrom ?? { c: this.home, scale: 1 };
+      return { c: { x: f.c.x + (slot.x - f.c.x) * e, y: f.c.y + (slot.y - f.c.y) * e }, scale: f.scale + (s - f.scale) * e, energy: 1 };
+    }
     if (this.phase === 'parked') return { c: slot, scale: s, energy: 0.3 };
     if (this.phase === 'toStage') return { c: { x: slot.x + (this.home.x - slot.x) * e, y: slot.y + (this.home.y - slot.y) * e }, scale: s + (1 - s) * e, energy: 1 };
     return { c: this.home, scale: 1, energy: 1 };
@@ -317,7 +332,7 @@ export class Doodle implements Creature {
   private frame(): { user: Pt[][]; clean: Pt[][] } {
     const settle = Math.min(1, this.t / SETTLE_MS), se = settle * settle * (3 - 2 * settle);
     const bk = Math.min(1, Math.max(0, (this.t - this.beautifyAt) / BEAUTIFY_MS)), be = bk * bk * (3 - 2 * bk) * 0.6;
-    const still = this.phase === 'clip' || this.phase === 'afterClip';
+    const still = this.phase === 'clip' || this.phase === 'afterClip' || this.frozen;
     const m = still ? null : this.motion, t = Math.max(0, this.t - this.aliveAt), s = this.size;
     const { c, scale: place, energy } = this.placement();
     const wake = (m ? Math.min(1, t / WAKE_MS) : 0) * energy;
@@ -337,7 +352,7 @@ export class Doodle implements Creature {
     if (m === 'beat') { const b = (t / (energy < 1 ? 1400 : 1000)) % 1; scale *= 1 + (Math.exp(-((b - 0.1) ** 2) / 0.002) * 0.12 + Math.exp(-((b - 0.3) ** 2) / 0.002) * 0.08) * Math.max(wake, 0.3); }
     if (m === 'twinkle') { scale *= 1 + Math.sin(t / 260) * 0.06 * Math.max(wake, 0.3); rot = Math.sin(t / 1300) * 0.08 * wake; }
     if (m === 'hop') { const ph = (t / 800) % 1, land = Math.max(0, 1 - Math.abs(ph - 0.98) * 12); sy = 1 - 0.12 * land * performing; sx = 1 + 0.08 * land * performing; }
-    if (this.phase === 'parked') scale *= 1 + Math.sin(this.t / 1200) * 0.015; // resting: a gentle breath
+    if (this.phase === 'parked' && !this.frozen) scale *= 1 + Math.sin(this.t / 1200) * 0.015; // resting: a gentle breath
     const cos = Math.cos(rot), sin = Math.sin(rot);
     const pivotY = m === 'sway' ? Math.max(...(this.clean ? this.clean.flatMap((st) => st.pts.map((p) => p.y)) : this.strokes.flatMap((st) => st.base.map((p) => p.y)))) : 0;
     const put = (x0: number, y0: number): Pt => {
@@ -385,7 +400,7 @@ export class Doodle implements Creature {
     // your lines, fading as the clean drawing draws itself over them
     if (k < 1) {
       ctx.globalAlpha = fade * (1 - k);
-      const fillOne = user.length === 1 && this.strokes[0].closed && !this.clean;
+      const fillOne = false; // your own lines stay lines
       for (const pts of user) {
         ctx.beginPath();
         pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));

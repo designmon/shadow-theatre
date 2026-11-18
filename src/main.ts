@@ -4,6 +4,8 @@ import { wallMask, warpMask } from './calibration/homography';
 import { debounce, MisalignmentWatch } from './calibration/watch';
 import { grabFrame, listCameras, saveCameraId, savedCameraId, startCamera } from './camera';
 import { litFrame } from './vision/light';
+import { compositionArea, drawDecor, layout, type Decor } from './draw/composition';
+import { pauseIcon, WallButton } from './ui/wallButton';
 import { exportDrawing, exportScene } from './runway/export';
 import { ClipPlayer, watchClips, type ClipEvent } from './runway/clips';
 import { Checklist, describeHealth, type Health } from './setup/checklist';
@@ -17,7 +19,7 @@ import type { Gray, Mask } from './types';
 import { findBlobs } from './vision/blobs';
 import { HoldDetector } from './vision/hold';
 import { projectBox, projectMask } from './vision/project';
-import { analyzeScene, isUsablePuppet, sceneLit, usableReason, type Scene } from './vision/scene';
+import { analyzeScene, isUsablePuppet, sceneLit, usableReason, type Scene, type SceneMemory } from './vision/scene';
 import { setBlur } from './creatures/style';
 import { bridgeOwnInk, dilate, erode, keepInside, litMask, minFilter, ownInk, shadowMask, smoothMask, wallInterior } from './vision/shadowMask';
 import { installSimCamera } from './sim';
@@ -41,36 +43,52 @@ let calibrating = false;
 let status = 'not calibrated (press C)';
 let lastRec = '—';
 const watch = new MisalignmentWatch();
-const MAX_CREATURES = 8;
+const MAX_CREATURES = 18; // the composition keeps its own limits per zone (draw/composition.ts)
 const pen = new LaserPen();
 const sparkles = new Sparkles();
 /** Shadow-puppet recognition (hold a hand shape -> animal). Off while the fingertip pen is the focus. */
 const PUPPETS = false;
 let penState: PenState = { mode: 'idle', arm: 0, cursor: null, strokes: [] };
-const ROW_SLOTS = 9; // drawings rest in a row along the bottom of the wall
 let hovered: { d: Doodle; since: number; seen: number } | null = null;
+const sceneMemory: SceneMemory = {}; // where the arm comes in, kept between frames
+let lastTipCam: { x: number; y: number } | null = null; // the pen's finger last frame (camera px): stay on it
 let rawTip: { x: number; y: number } | null = null; // where the camera sees the fingertip this frame (debug: a small +) // a resting drawing the fingertip points at
 const WAKE_DWELL_MS = 500;
 let lastPointingAt = -Infinity;
 const POINTING_QUIET_MS = 1500; // a finger seen pointing recently is a pen, never a puppet
 
 /** The row along the bottom where drawings rest: the next free place (the oldest makes room). */
-function restingPlace(d: Doodle): { at: { x: number; y: number }; scale: number } {
-  const { w, h } = stage.size();
-  const doodles = creatures.filter((c): c is Doodle => c instanceof Doodle && !c.retiring);
-  if (doodles.length > ROW_SLOTS) doodles[0].retire();
-  const index = (doodles.indexOf(d) + Math.max(0, doodles.length - ROW_SLOTS)) % ROW_SLOTS;
-  const slotW = w / ROW_SLOTS;
-  return { at: { x: w - slotW * (index + 0.5), y: h - Math.min(h * 0.11, slotW * 0.45) }, scale: Math.min(0.5, (slotW * 0.7) / d.drawnSize) };
+/**
+ * Finished drawings move to the side and arrange themselves into a little landscape (sky, ground,
+ * water), with a few details of the scene's own. Re-run whenever a drawing is named or leaves.
+ */
+let decor: Decor | null = null;
+function compose(): void {
+  const ds = creatures.filter((c): c is Doodle => c instanceof Doodle && !c.retiring && !!c.what);
+  const items = ds.map((d) => {
+    const pts = d.restShape().flatMap((sh) => sh.pts);
+    return { label: d.what, top: Math.min(...pts.map((p) => p.y)), bottom: Math.max(...pts.map((p) => p.y)), left: Math.min(...pts.map((p) => p.x)), right: Math.max(...pts.map((p) => p.x)) };
+  });
+  const { places, decor: dc } = layout(items, compositionArea(stage.size()));
+  places.forEach((p, i) => (p ? ds[i].park(p.at, p.scale) : ds[i].retire()));
+  decor = ds.length ? dc : null;
+}
+
+// the stop button on the wall: make a fist over it and open your hand (or press P)
+const pauseButton = new WallButton(['pause', 'play'], pauseIcon);
+let fistFrames = 0;
+function setPaused(on: boolean): void {
+  pauseButton.on = on;
+  for (const c of creatures) if (c instanceof Doodle) c.frozen = on;
+  say(on ? 'paused — the drawings rest' : 'playing');
 }
 
 /** A finished fingertip drawing: appears as drawn, refines, is recognised and comes alive. */
 function bringDrawingToLife(strokes: { x: number; y: number }[][]): void {
   const { w, h } = stage.size();
   const doodle = new Doodle(strokes, { w, h });
+  doodle.frozen = pauseButton.on;
   creatures.push(doodle);
-  const place = restingPlace(doodle);
-  doodle.park(place.at, place.scale);
   doodleToPng(strokes)
     .then((png) => fetch('/api/doodle', { method: 'POST', body: png, headers: { 'content-type': 'image/png' } }))
     .then((r) => (r.ok ? r.json() : { what: 'something', motion: 'float', confidence: 0 }))
@@ -79,6 +97,7 @@ function bringDrawingToLife(strokes: { x: number; y: number }[][]): void {
       const motion = motionFor(rec.what, rec.motion);
       lastRec = `drawing: ${rec.what} → ${motion}${rec.note ? ' — ' + rec.note : ''}`;
       doodle.comeAlive(motion, rec.what); // your own line, refined, with the motion that fits it
+      compose(); // its place in the composition (it goes there after performing)
       // also save it for Runway (captures/runway-in/<id>.png + prompt), once the clean drawing is in
       setTimeout(() => void exportDrawing(doodle).then((id) => { if (id) matchClips(doodle); }), 1600);
     });
@@ -308,6 +327,7 @@ async function main() {
       // the whole wall for Runway: every drawing where it is now (captures/runway-in/scene-…)
       void exportScene(doodles(), stage.size(), { w: stage.canvas.width, h: stage.canvas.height }).then((name) => say(name ? `saved for Runway: ${name}` : 'could not save — is the server running?'));
     }
+    if (k === 'p') setPaused(!pauseButton.on);
     if (k === 'v') { if (latestScene) playScene(latestScene); else say('no scene clip yet — drop one into captures/runway-out/'); }
     if (k === 'c') calibrate();
     if (k === 's') panel!.show(!panel!.visible);
@@ -347,7 +367,8 @@ async function main() {
       const steady = creatures.length ? erode(projectedDarkInCamera(frame, false, true), 2) : null;
       const score = steady && countOnes(steady) >= 1000 ? alignmentScore(grabbed.luma, calib.whiteRef, steady, calib.dark) /* blue ink is dark in plain brightness */ : null;
       if (watch.push(score, now)) { status = 'projector moved — re-aligning'; calibrate(true); return; }
-      scene = analyzeScene(mask, findBlobs(mask), lit ? sceneLit(lit, projectedDarkInCamera(frame, true, false, false)) : undefined); // only on-wall panels hide the picture edge — a hand over a drawing still comes from the real edge
+      scene = analyzeScene(mask, findBlobs(mask), lit ? sceneLit(lit, projectedDarkInCamera(frame, true, false, false)) : undefined, penState.mode === 'idle' ? null : lastTipCam, sceneMemory);
+      lastTipCam = scene ? { ...scene.tip } : null; // only on-wall panels hide the picture edge — a hand over a drawing still comes from the real edge
       if (scene) checklist.shadow('ok', 'seen — make a shape and hold it still', now);
       if (scene && lit) whyIgnored = usableReason(scene, own ?? { width: frame.width, height: frame.height, data: new Uint8Array(frame.data.length) }, lit);
       const usable = scene && lit && isUsablePuppet(scene, own ?? { width: frame.width, height: frame.height, data: new Uint8Array(frame.data.length) }, lit);
@@ -378,13 +399,24 @@ async function main() {
           hovered = null;
         }
       } else hovered = null;
-      penState = pen.update(tipProj && scene && !resting ? { tip: tipProj, pose: scene.pose, dir: dirProj } : null, now);
+      // the stop button: a quick fist over it (only while not drawing)
+      const penFree = penState.mode === 'idle' || penState.mode === 'arming';
+      fistFrames = scene?.pose === 'fist' ? fistFrames + 1 : 0;
+      // a fist is where its palm is (it has no fingertip); otherwise the fingertip
+      const handAt = scene && calib ? (scene.pose === 'fist' && scene.palm ? applyH(calib.camToProj, scene.palm) : tipProj) : null;
+      if (penFree && pauseButton.feed(handAt, fistFrames >= 2, stage.size(), now)) {
+        setPaused(pauseButton.on);
+        const c = pauseButton.centre(stage.size());
+        sparkles.burst(c, 10, 60);
+      }
+      const atButton = penFree && pauseButton.hovered;
+      penState = pen.update(tipProj && scene && !resting && !atButton ? { tip: tipProj, pose: scene.pose, dir: dirProj } : null, now);
       const finished = pen.takeFinished();
       if (finished) bringDrawingToLife(finished);
       for (const b of pen.takeBursts()) sparkles.burst(b.at, b.kind === 'finish' ? 16 : 10, b.kind === 'finish' ? 140 : 70);
       if (penState.mode === 'down' && penState.cursor) sparkles.trail(penState.cursor, dt); else sparkles.lift();
       if (scene?.pointing) lastPointingAt = now;
-      if ((window as any).__trace) { (window as any).__mask = mask; (window as any).__lit = lit; (window as any).__handSeen = !!scene; (window as any).__doodles = doodles; (window as any).__wallClip = () => wallClip; }
+      if ((window as any).__trace) { (window as any).__mask = mask; (window as any).__lit = lit; (window as any).__handSeen = !!scene; (window as any).__doodles = doodles; (window as any).__wallClip = () => wallClip; (window as any).__paused = () => pauseButton.on; (window as any).__btn = () => ({ tip: scene?.pose === 'fist' && scene.palm && calib ? applyH(calib.camToProj, scene.palm) : rawTip, hov: pauseButton.hovered, c: pauseButton.centre(stage.size()), pose: scene?.pose, fistFrames }); }
       if ((window as any).__trace) console.log('[trace]', Math.round(now), scene ? `pointing=${scene.pointing} tip=${Math.round(scene.tip.x)},${Math.round(scene.tip.y)} box=${JSON.stringify(scene.puppetBox)} usable=${!!usable}` : 'no scene', penState.mode, scene?.pose ?? '');
       const penNearby = penState.mode !== 'idle' || now - lastPointingAt < POINTING_QUIET_MS;
       if (penNearby) hold.reset(); // a pointing finger is a pen, not a puppet
@@ -415,7 +447,9 @@ async function main() {
     for (let i = 0; i < alive.length - MAX_CREATURES; i++) alive[i].retire();
     for (const c of creatures) c.update(dt);
     sparkles.update(dt);
-    for (let i = creatures.length - 1; i >= 0; i--) if (creatures[i].done) creatures.splice(i, 1);
+    let gone = false;
+    for (let i = creatures.length - 1; i >= 0; i--) if (creatures[i].done) { creatures.splice(i, 1); gone = true; }
+    if (gone) compose();
 
     if (panel!.visible) {
       panel!.render(checklist);
@@ -437,7 +471,9 @@ async function main() {
       if (p.ended || since > 60000) wallClip = null;
     }
     for (const d of doodles()) d.veil = veil;
+    if (decor) drawDecor(stage.ctx, decor, INK_COLOR, pauseButton.on ? 0 : now, veil);
     for (const c of creatures) c.draw(stage.ctx);
+    pauseButton.draw(stage.ctx, stage.size(), INK_COLOR, accentAt, now);
     if (note) {
       const a = Math.min(1, (now - note.at) / 250) * Math.min(1, (3200 - (now - note.at)) / 500);
       if (a <= 0) note = null;

@@ -1,11 +1,12 @@
 import type { Box, Mask, Pt, Side } from '../types';
 import type { Blob } from './blobs';
+import { findFingers, longFingers, pickFinger } from './fingers';
 
 /** neck: cross-width of the shadow just behind the puppet / the puppet's cross-width (null if nothing behind it). */
 /** pointing: one thin finger sticking out (laser drawing); tip: its fingertip; tipDir: which way it points. */
 /** pose: point = one finger out (pen draws), fist = closed hand (finish), open = anything else (pen lifted). */
 export type Pose = 'point' | 'fist' | 'open';
-export type Scene = { puppet: Mask; puppetBox: Box; entry: Side | null; openSide: Side; bodyBox: Box | null; neck: number | null; pointing: boolean; tip: Pt; tipDir: Pt; pose: Pose };
+export type Scene = { puppet: Mask; puppetBox: Box; entry: Side | null; openSide: Side; bodyBox: Box | null; neck: number | null; pointing: boolean; tip: Pt; tipDir: Pt; pose: Pose; palm?: Pt };
 
 const TIP_FRACTION = 0.3;
 const MIN_TIP_FRACTION = 0.12; // smallest puppet window, of the wall size
@@ -27,7 +28,10 @@ function boxOf(indices: Iterable<number>, W: number): Box | null {
  * The performer's shadow: where it enters the frame, the "puppet" (the far
  * tip, where the hands are), and the open side for creatures to move into.
  */
-export function analyzeScene(mask: Mask, blobs: Blob[], lit?: Mask): Scene | null {
+/** Remembered between frames: where the arm comes in (it doesn't jump; a hand touching another edge later shouldn't move it). */
+export type SceneMemory = { entry?: Pt; seenAt?: number };
+
+export function analyzeScene(mask: Mask, blobs: Blob[], lit?: Mask, prevTip?: Pt | null, memory?: SceneMemory): Scene | null {
   const blob = blobs[0];
   if (!blob) return null;
   const { width: W, height: H } = mask;
@@ -58,10 +62,45 @@ export function analyzeScene(mask: Mask, blobs: Blob[], lit?: Mask): Scene | nul
   const dist = new Int32Array(W * H).fill(-1);
   const queue = new Int32Array(blob.pixels.length);
   let qh = 0, qt = 0;
+  // Where it comes in: only the biggest place the shadow touches the picture's edge (the arm).
+  // A fist or fingertip that also touches an edge somewhere must not count as "where it comes in".
+  const edge: number[] = [];
   for (const i of blob.pixels) {
     const x = i % W, y = (i / W) | 0;
-    if (off(x - 1, y) || off(x + 1, y) || off(x, y - 1) || off(x, y + 1)) { dist[i] = 0; queue[qt++] = i; }
+    if (off(x - 1, y) || off(x + 1, y) || off(x, y - 1) || off(x, y + 1)) edge.push(i);
   }
+  const edgeSet = new Set(edge), group = new Map<number, number>();
+  let best = -1, bestN = 0;
+  const groups: { id: number; n: number; c: Pt }[] = [];
+  for (const s0 of edge) {
+    if (group.has(s0)) continue;
+    const st = [s0];
+    group.set(s0, s0);
+    let n0 = 0;
+    while (st.length) {
+      const i = st.pop()!, x = i % W;
+      n0++;
+      for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+        if (x + dx < 0 || x + dx >= W) continue;
+        const j = i + dy * W + dx;
+        if (edgeSet.has(j) && !group.has(j)) { group.set(j, s0); st.push(j); }
+      }
+    }
+    if (n0 > bestN) { bestN = n0; best = s0; }
+    groups.push({ id: s0, n: n0, c: { x: 0, y: 0 } });
+  }
+  if (groups.length > 1 && memory?.entry) {
+    // stay with where the arm came in before
+    for (const g of groups) { let sx = 0, sy = 0; for (const i of edge) if (group.get(i) === g.id) { sx += i % W; sy += (i / W) | 0; } g.c = { x: sx / g.n, y: sy / g.n }; }
+    const near = groups.reduce((a, b) => (Math.hypot(b.c.x - memory.entry!.x, b.c.y - memory.entry!.y) < Math.hypot(a.c.x - memory.entry!.x, a.c.y - memory.entry!.y) ? b : a));
+    if (Math.hypot(near.c.x - memory.entry.x, near.c.y - memory.entry.y) < Math.max(W, H) * 0.25) best = near.id;
+  }
+  if (memory) {
+    let sx = 0, sy = 0, n1 = 0;
+    for (const i of edge) if (group.get(i) === best) { sx += i % W; sy += (i / W) | 0; n1++; }
+    if (n1) memory.entry = { x: sx / n1, y: sy / n1 };
+  }
+  for (const i of edge) if (group.get(i) === best) { dist[i] = 0; queue[qt++] = i; }
   let far = 0;
   while (qh < qt) {
     const i = queue[qh++], x = i % W, d = dist[i] + 1;
@@ -149,8 +188,28 @@ export function analyzeScene(mask: Mask, blobs: Blob[], lit?: Mask): Scene | nul
   const { pieces, ...finger } = pointingFinger(blob.pixels, dist, far, W, Math.max(wallW, wallH));
   // fist: a compact end (about as long as it is wide); open: several fingers, or a long flat hand
   const handLen = far - cut, handW = extent(hand);
-  const pose: Pose = finger.pointing ? 'point' : pieces >= 2 ? 'open' : handLen <= 1.35 * handW ? 'fist' : 'open';
-  return { puppet, puppetBox: boxOf(tip, W)!, entry: opposite[openSide], openSide, bodyBox: boxOf(body, W), neck, ...finger, pose };
+  let pose: Pose = finger.pointing ? 'point' : pieces >= 2 ? 'open' : handLen <= 1.35 * handW ? 'fist' : 'open';
+  // Better: find the fingers by their shape (vision/fingers.ts). One long finger = point, and the
+  // pen is that finger's own tip, wherever the arm comes from; several = open; none = fist (if compact).
+  const edgePx = (i: number) => { const x = i % W, y = (i / W) | 0; return off(x - 1, y) || off(x + 1, y) || off(x, y - 1) || off(x, y + 1); };
+  const handShape = findFingers(inBlob, W, H, Array.from(blob.pixels), edgePx, dist, far);
+  if (handShape) {
+    const long = longFingers(handShape);
+    if (long.length) {
+      const f = pickFinger(handShape, prevTip ?? null)!;
+      pose = long.length === 1 ? 'point' : 'open';
+      finger.tip = f.tip;
+      finger.tipDir = f.dir;
+      finger.pointing = pose === 'point';
+    } else {
+      finger.pointing = false;
+      // no finger out: a fist (nothing reaches past the palm by more than about its radius), or a
+      // flat hand with the fingers together (it does)
+      const beyondPalm = far - Math.max(0, dist[handShape.palmIndex]);
+      pose = beyondPalm <= 2.1 * handShape.palmR ? 'fist' : 'open'; // (steps along the shadow overstate diagonals a little)
+    }
+  }
+  return { puppet, puppetBox: boxOf(tip, W)!, entry: opposite[openSide], openSide, bodyBox: boxOf(body, W), neck, ...finger, pose, palm: handShape?.palm };
 }
 
 const MAX_PUPPET_FRACTION = 0.5; // of the lit wall (bodies are caught by the hand-sticking-out rule)

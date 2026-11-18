@@ -53,8 +53,11 @@ export function installSimCamera(stage: () => HTMLCanvasElement): void {
       // ?wake: every other visit, point at the drawing resting in the bottom-right corner instead
       const visiting = shape === 'point' && params.has('wake') && Math.floor((t - start) / 9) % 2 === 1;
       if (visiting) { hx = 130 + reach * 340; hy = 262 + reach * 160; }
-      if (shape === 'point' && cycle >= 5 && !visiting) pose = 'blob'; // close the hand into a fist: done
-      if (shape === 'point' && cycle > 2.6 && cycle < 5 && !visiting) {
+      // ?click: every third visit, a fist over the stop button (top right), then the hand opens
+      const clicking = shape === 'point' && params.has('click') && Math.floor((t - start) / 9) % 3 === 2;
+      if (clicking) { hx = 130 + reach * 345; hy = 262 - reach * 125; pose = cycle > 1.6 && cycle < 2.4 ? 'blob' : 'point'; }
+      if (shape === 'point' && cycle >= 5 && !visiting && !clicking) pose = 'blob'; // close the hand into a fist: done
+      if (shape === 'point' && cycle > 2.6 && cycle < 5 && !visiting && !clicking) {
         // draw a loop with the fingertip (after holding still to get the laser)
         const a = ((cycle - 2.6) / 2.4) * Math.PI * 2;
         hx += Math.sin(a) * 70; hy += (1 - Math.cos(a)) * 35;

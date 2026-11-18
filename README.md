@@ -90,13 +90,25 @@ Your hand is the pen, with three gestures:
 | **Open your hand** | lifts the pen: move somewhere else, point again for the next stroke (eyes, whiskers…) |
 | **Close your hand into a fist** | done. (Pulling your hand out of the light also finishes) |
 
-When you finish, your line is refined (a rough heart, star or circle eases toward a clean one),
-recognised, and briefly labelled. Then it moves the way that thing moves: a heart beats, a cat
-or dog walks (each in its own way), a bird flies, a fish swims, a star twinkles, the sun turns,
-a flower sways. After a few seconds it **walks to its place in a row along the bottom of the
-wall**, filling from the bottom-right corner. **Point at a resting drawing** and hold for half a
-second (a ring fills around it) and it wakes up and performs again. Nine drawings fit in the
-row; after that the oldest makes room.
+When you finish, a clean drawing of what it is draws itself over your line and it moves the
+way that thing moves: a heart beats, a cat or dog walks, a bird flies, a fish swims. Then it goes
+to the **composition** on the right side of the wall, a little landscape that builds up as you
+draw:
+- **Sky:** birds, butterflies, planes, clouds, stars, and the sun or moon in the corner.
+- **Ground:** animals, flowers, trees, houses, people and cars, standing on a ground line and
+  sized sensibly (a tree is taller than a cat).
+- **Water:** boats on the waves, fish just below.
+
+The scene adds its own quiet details: grass by the plants, waves, and two far-off birds following
+a bird. Point at a drawing in the composition for half a second to wake it.
+
+**The pause button** (top right of the wall): make a **fist over it and open your hand**, a
+quick click. Everything stops moving; click again to play. The **P** key does the same.
+
+**How the pen finds your fingertip:** it finds your palm (the widest part of the hand's shadow)
+and your fingers (what sticks out of it), and draws with the tip of the longest finger. It stays
+on that finger while you draw, so a thumb or knuckle can't steal the pen, whichever way your arm
+comes in. One finger out = draw, several = pen lifted, none = fist.
 
 The ink is a vivid blue, not black: to the camera black ink looks exactly like a shadow, while
 blue ink still sends the projector's full blue light and reads as lit wall. The accent (blue →
