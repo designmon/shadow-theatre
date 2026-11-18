@@ -3,6 +3,7 @@ import { createServer } from 'node:http';
 import { saveCalibrationFrames, saveCapture, saveDoodle } from './captures';
 import { ClipWatcher, saveRunwayInput, serveClip, streamClipEvents, type RunwayExport } from './runway';
 import { RunwayGenerator } from './runwayApi';
+import { COMMAND_MODEL, planCommand, type SceneItem } from './command';
 import { handleHealth, type HealthClient } from './health';
 import { jevHealth, MODEL, recognizeDoodleWithJev, recognizeWithJev } from './jev';
 import { CLIENT_OPTIONS, handleRecognize, UNKNOWN, type RecognizeClient } from './recognize';
@@ -27,6 +28,7 @@ try {
 const clips = new ClipWatcher();
 // Runway phase 2: automatic with RUNWAYML_API_SECRET (server only); without it, the manual round-trip
 const runway = RunwayGenerator.fromEnv();
+console.log(`voice commands: ${OPENROUTER_KEY ? COMMAND_MODEL + ' on OpenRouter' : 'simple phrases only (set OPENROUTER_API_KEY)'}`);
 console.log(runway ? `runway: automatic via the API (${runway.model}, up to ${runway.dailyCap} a day, ${runway.usedToday()} used today)` : 'runway: manual (set RUNWAYML_API_SECRET to generate automatically)');
 clips.start();
 clips.onClip((f) => console.log(`[runway] clip ready: captures/runway-out/${f}`));
@@ -43,6 +45,21 @@ createServer(async (req, res) => {
     console.log(`[doodle] ${rec.what} → ${rec.motion} (${rec.confidence.toFixed(2)}) in ${ms} ms${rec.note ? '  — ' + rec.note : ''}`);
     try { saveDoodle('captures/doodles', png, rec.what, rec.motion, ms, MODEL); } catch { /* saving is best-effort */ }
     return json(rec);
+  }
+  // voice commands: the words + what's on the wall -> a little script for the drawings
+  if (req.method === 'POST' && req.url === '/api/command') {
+    const chunks: Buffer[] = [];
+    for await (const c of req) chunks.push(c as Buffer);
+    try {
+      const { text, items } = JSON.parse(Buffer.concat(chunks).toString('utf8')) as { text: string; items: SceneItem[] };
+      const started = Date.now();
+      const plan = await planCommand(String(text ?? '').slice(0, 500), Array.isArray(items) ? items.slice(0, 40) : [], OPENROUTER_KEY);
+      console.log(`[command] "${text}" -> ${plan.steps.length} steps in ${Date.now() - started} ms${plan.note ? '  — ' + plan.note : ''}: ${plan.story}`);
+      return json(plan);
+    } catch (err) {
+      res.writeHead(400).end(String(err instanceof Error ? err.message : err));
+      return;
+    }
   }
   // Runway, phase 1: exports in, clips out (server/runway.ts)
   if (req.method === 'POST' && req.url === '/api/runway/in') {

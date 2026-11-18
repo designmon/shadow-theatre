@@ -86,9 +86,8 @@ Your hand is the pen, with three gestures:
 | Gesture | What happens |
 | --- | --- |
 | **Point one finger** and rest it a moment | a thin ring closes: the pen is on, at your fingertip |
-| **Move while pointing** | you draw. The ink trails your fingertip on a short string (a "lazy brush"), so a shaky hand still draws a steady line |
-| **Curl your finger** (make a fist) | the pen lifts: move somewhere else and **point again** for the next stroke (eyes, whiskers…) |
-| **Keep the fist closed** (about a second) | a ring fills, and the drawing is finished. (Pulling your hand out of the light also finishes) |
+| **Move while pointing** | you draw one continuous line. Only your fingertip counts: if it passes over your hand's own shadow, the pen waits for it instead of jumping. The ink trails your fingertip on a short string, so a shaky hand still draws a steady line |
+| **Rest your fingertip still** (about a second) | a ring fills, and the drawing is finished. (Pulling your hand out of the light also finishes) |
 
 When you finish, a clean drawing of what it is draws itself over your line and it moves the
 way that thing moves: a heart beats, a cat or dog walks, a bird flies, a fish swims. Then it goes
@@ -106,9 +105,17 @@ a bird. Point at a drawing in the composition for half a second to wake it.
 it: the bird visits the flower, the dog wants to play and the cat isn't impressed, a cloud rains
 on the flower and it grows, the sun wakes everyone up.
 
-**Click a drawing** (a quick fist over it, then open your hand): it asks you something, like the
-dog's *"Play with me? Fetch! / Nap"* or the flower's *"Water me?"*. Click an answer and it does
-it. When the app isn't sure what you drew, the drawing asks: *"Am I a cat or a dog?"*
+**Select a drawing** with a click (a quick fist over it, then open your hand). A dashed ring
+shows it's selected; in what you say next, "this" or "it" means the selected drawing.
+
+**Voice commands.** **Wave** your open hand and a sketched sound wave appears left of the pause
+button: it's listening, and shows what it hears. Say what should happen, e.g. *"the plane lands,
+the fish gets on, and they fly off"*. Then show a **stop sign** (open palm, held still; drop your
+hand once after waving first) or click **send**. The drawings act it out and the story panel
+(bottom left) tells it. There's no spoken reply. **M** on the keyboard starts and sends too.
+It uses Chrome's speech recognition (allow the microphone once) and, with `OPENROUTER_API_KEY`,
+`anthropic/claude-haiku-5.5` on OpenRouter to turn your words into actions (`COMMAND_MODEL` picks
+another). Without the key only simple phrases work ("the dog jumps").
 
 **The pause button** (top right of the wall): make a **fist over it and open your hand**, a
 quick click. Everything stops moving; click again to play. The **P** key does the same.

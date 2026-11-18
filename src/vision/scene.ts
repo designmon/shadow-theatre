@@ -198,6 +198,9 @@ export function analyzeScene(mask: Mask, blobs: Blob[], lit?: Mask, prevTip?: Pt
     if (long.length) {
       const f = pickFinger(handShape, prevTip ?? null)!;
       pose = long.length === 1 ? 'point' : 'open';
+      // drawing, and the only finger in sight is far from where the fingertip just was: that's not
+      // the fingertip (it's hidden over the hand's own shadow) — say so, and the pen waits for it
+      if (prevTip && Math.hypot(f.tip.x - prevTip.x, f.tip.y - prevTip.y) > 3 * handShape.palmR) pose = 'open';
       finger.tip = litAt ? refineTip(f.tip, f.dir, litAt, f.width) : f.tip; // between pixels: a steady line
       finger.tipDir = f.dir;
       finger.pointing = pose === 'point';

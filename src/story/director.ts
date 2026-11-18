@@ -4,8 +4,7 @@ import type { Pt } from '../types';
 /**
  * Little stories between the drawings. Every so often the director picks a scene that fits who is
  * on the wall (the bird visits the flower, the dog greets the cat, a cloud rains on the flower)
- * and a short caption tells it. Clicking a drawing (a quick fist over it) makes it ask you
- * something; your answer decides what happens next.
+ * and a short line for the story tells it.
  */
 
 const SAYS: Record<string, string[]> = {
@@ -153,28 +152,6 @@ export class Director {
     return B.filter(() => true);
   }
 
-  /** Clicked (a quick fist over it): it asks you something; your answer decides what it does. */
-  clicked(d: Doodle): void {
-    const all = this.cast().filter((x) => x.what);
-    const doTrick = (t: Trick, text: string) => { d.trick(t); d.say(text); };
-    const ask = (q: string, options: string[], then: Record<string, () => void>) => d.say(q, 8000, options, (o) => then[o]?.());
-    const nameD = name(d);
-    switch (d.what) {
-      case 'dog': return ask('Play with me?', ['Fetch!', 'Nap'], { 'Fetch!': () => { doTrick('jump', 'Got it!'); this.tell('The dog plays fetch.'); }, Nap: () => { d.say('zzz', 4000); this.tell('The dog takes a nap.'); } });
-      case 'cat': return ask('Pet me?', ['Pet', 'Shoo'], { Pet: () => { doTrick('grow', 'Purrr…'); this.tell('The cat purrs.'); }, Shoo: () => { doTrick('shake', 'Hmph!'); this.tell('The cat is offended.'); } });
-      case 'bird': return ask('Shall I sing?', ['Sing', 'Fly'], { Sing: () => { doTrick('spin', '♪ ♪ ♪'); this.tell('The bird sings.'); }, Fly: () => { const p = all.find((x) => PERCHES.includes(x.what)); if (p) d.visit(this.beside(p, true), 3000); else d.trick('spin'); this.tell('The bird flies off.'); } });
-      case 'flower': case 'tree': return ask('Water me?', ['Water', 'Later'], { Water: () => { const c = all.find((x) => x.what === 'cloud' && x.resting); if (c) { c.visit(this.beside(d, true), 3600); this.later(1800, () => c.trick('rain')); this.later(3800, () => doTrick('grow', 'Thank you!')); } else doTrick('grow', 'Ahh, thank you!'); this.tell(`The ${nameD} gets some water.`); }, Later: () => d.say('…okay.') });
-      case 'sun': case 'moon': return ask('Day or night?', ['Day', 'Night'], { Day: () => { all.forEach((x, i) => this.later(i * 200, () => x.trick(x === d ? 'grow' : 'jump'))); d.say('Good morning!'); this.tell('A new day begins.'); }, Night: () => { all.forEach((x, i) => this.later(i * 250, () => x.say('zzz', 3000))); this.tell('Everyone goes to sleep.'); } });
-      case 'fish': return ask('Want to see a jump?', ['Yes!', 'Swim'], { 'Yes!': () => { doTrick('jump', 'Splash!'); this.tell('The fish jumps.'); }, Swim: () => doTrick('shake', 'blub blub') });
-      case 'heart': return ask('Who do you love?', all.filter((x) => x !== d).slice(0, 2).map(name).concat(all.length < 2 ? ['Everyone'] : []), Object.fromEntries(all.filter((x) => x !== d).map((x) => [name(x), () => { d.visit({ x: x.where.x, y: x.box().y - 40 }, 3000); this.later(2000, () => x.say('♥')); this.tell(`Love for the ${name(x)}.`); }]).concat([['Everyone', () => doTrick('grow', '♥ ♥ ♥')]])));
-      default: return ask('What should I do?', ['Dance', 'Sleep'], { Dance: () => { doTrick('spin', '♪'); this.later(900, () => d.trick('jump')); this.tell(`The ${nameD} dances.`); }, Sleep: () => { d.say('zzz', 4000); this.tell(`The ${nameD} sleeps.`); } });
-    }
-  }
-
-  /** The recognition wasn't sure: the drawing asks you what it is. */
-  askWhat(d: Doodle, options: string[], relabel: (what: string) => void): void {
-    d.say(`Am I a ${options.slice(0, -1).join(', a ')} or a ${options[options.length - 1]}?`, 9000, options, (o) => { relabel(o); d.say(`A ${o}! Thank you.`); });
-  }
 }
 
 /** For the caption: draw it under the composition, light and small. */
@@ -189,4 +166,36 @@ export function drawCaption(ctx: CanvasRenderingContext2D, c: { text: string; at
   ctx.textAlign = 'center';
   ctx.fillText(c.text, x, y);
   ctx.restore();
+}
+
+/** The story so far, in the corner of the wall: the last few lines, the newest brightest. */
+export class StoryLog {
+  private lines: { text: string; at: number }[] = [];
+  add(text: string, now: number): void {
+    if (!text || this.lines[this.lines.length - 1]?.text === text) return;
+    this.lines.push({ text, at: now });
+    if (this.lines.length > 4) this.lines.shift();
+  }
+  get last(): string { return this.lines[this.lines.length - 1]?.text ?? ''; }
+  draw(ctx: CanvasRenderingContext2D, wall: { w: number; h: number }, ink: string, now: number): void {
+    if (!this.lines.length) return;
+    ctx.save();
+    ctx.fillStyle = ink;
+    ctx.textAlign = 'left';
+    const x = 28, maxW = wall.w * 0.5;
+    let y = wall.h - 44;
+    for (let i = this.lines.length - 1; i >= 0; i--) {
+      const l = this.lines[i], newest = i === this.lines.length - 1;
+      ctx.globalAlpha = (newest ? 0.9 : 0.35 - (this.lines.length - 2 - i) * 0.08) * Math.min(1, (now - l.at) / 600);
+      ctx.font = `italic 300 ${newest ? 20 : 16}px "SF Pro Display", "Helvetica Neue", system-ui, sans-serif`;
+      // wrap long lines
+      const words = l.text.split(' '), rows: string[] = [];
+      let row = '';
+      for (const w of words) { const t = row ? row + ' ' + w : w; if (ctx.measureText(t).width > maxW && row) { rows.push(row); row = w; } else row = t; }
+      rows.push(row);
+      for (let r = rows.length - 1; r >= 0; r--) { ctx.fillText(rows[r], x, y); y -= newest ? 26 : 21; }
+      y -= 6;
+    }
+    ctx.restore();
+  }
 }

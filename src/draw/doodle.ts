@@ -131,7 +131,12 @@ export class Doodle implements Creature {
   private t = 0;
   private aliveAt = Infinity;
   private beautifyAt = Infinity;
-  private phase: 'drawn' | 'performing' | 'toPark' | 'parked' | 'toStage' | 'clip' | 'afterClip' | 'toVisit' | 'visiting' = 'drawn';
+  private phase: 'drawn' | 'performing' | 'toPark' | 'parked' | 'toStage' | 'clip' | 'afterClip' | 'toVisit' | 'visiting' | 'directed' = 'drawn';
+  private goal: { from: Pt; to: Pt; at: number; ms: number } | null = null;
+  private rideOn: { on: Doodle; dx: number; dy: number } | null = null;
+  private backAt: number | null = null; // left the wall: come back by itself then
+  /** Clicked: chosen for what you say next ("this", "it"). */
+  selected = false;
   /** What it's saying (a speech bubble), in its own time. */
   bubble: Bubble | null = null;
   private trickKind: Trick | null = null;
@@ -243,9 +248,10 @@ export class Doodle implements Creature {
   }
   private bubbleLayout: BubbleLayout | null = null;
   /** Its bubble, on top of everything (main draws these last). */
-  drawSpeech(ctx: CanvasRenderingContext2D, wall: { w: number; h: number }, hover: Pt | null): void {
-    if (!this.bubble || this.done || this.veil <= 0) { this.bubbleLayout = null; return; }
-    this.bubbleLayout = drawBubble(ctx, this.bubble, this.anchor(), wall, INK, this.t, hover);
+  drawSpeech(ctx: CanvasRenderingContext2D, wall: { w: number; h: number }, hover: Pt | null, avoid: Box[] = []): Box | null {
+    if (!this.bubble || this.done || this.veil <= 0) { this.bubbleLayout = null; return null; }
+    this.bubbleLayout = drawBubble(ctx, this.bubble, this.anchor(), wall, INK, this.t, hover, avoid);
+    return this.bubbleLayout.box;
   }
   /** A click on one of its bubble's answers: answer it. */
   answerAt(p: Pt): boolean {
@@ -263,6 +269,48 @@ export class Doodle implements Creature {
     const L = this.bubbleLayout;
     return !!L && !!this.bubble?.options && p.x > L.box.x - 40 && p.x < L.box.x + L.box.w + 40 && p.y > L.box.y - 40 && p.y < L.box.y + L.box.h + 40;
   }
+
+  /** Told to: go to `p` (wall px) and stay there. */
+  goTo(p: Pt, ms = 1600): void {
+    const now = this.placement();
+    this.rideOn = null;
+    this.goal = { from: now.c, to: { ...p }, at: this.t, ms };
+    this.phase = 'directed';
+    this.phaseAt = this.t;
+    this.backAt = null;
+  }
+  /** Told to: get on `other` (a plane, a boat, a car) — it moves with it from now on. */
+  ride(other: Doodle): void {
+    const me = this.placement().c, it = other.where;
+    this.rideOn = { on: other, dx: me.x - it.x, dy: me.y - it.y };
+    this.goal = null;
+    this.phase = 'directed';
+    this.phaseAt = this.t;
+  }
+  unride(): void {
+    if (!this.rideOn) return;
+    const here = this.placement().c;
+    this.rideOn = null;
+    this.goal = { from: here, to: here, at: this.t, ms: 1 };
+  }
+  get riding(): Doodle | null { return this.rideOn?.on ?? null; }
+  /** Told to: leave the wall that way; it comes back to its place by itself a little later. */
+  leave(to: Pt, ms = 2200, backInMs = 9000): void {
+    this.goTo(to, ms);
+    this.backAt = this.t + ms + backInMs;
+  }
+  /** Told to: back to its own place. */
+  goHome(): void {
+    if (this.phase !== 'directed' && this.phase !== 'visiting') return;
+    const now = this.placement();
+    this.rideOn = null;
+    this.goal = null;
+    this.moveFrom = { c: now.c, scale: now.scale };
+    this.phase = this.slot ? 'toPark' : 'performing';
+    this.phaseAt = this.t;
+  }
+  get directed(): boolean { return this.phase === 'directed'; }
+  get returning(): boolean { return this.phase === 'toPark'; }
 
   /** Resting in the composition (free for a story). */
   get resting(): boolean { return this.phase === 'parked'; }
@@ -330,6 +378,8 @@ export class Doodle implements Creature {
   update(dtMs: number): void {
     if (this.bubble && this.t - this.bubble.at > this.bubble.ms) this.bubble = null;
     if (this.trickKind && this.t - this.trickAt > TRICK_MS[this.trickKind]) this.trickKind = null;
+    if (this.phase === 'directed' && this.backAt !== null && this.t > this.backAt) { this.backAt = null; this.goHome(); }
+    if (this.rideOn && this.rideOn.on.returning) this.goHome(); // the vehicle goes home: the passenger gets off and goes home too
     if (this.phase === 'toVisit' && this.t - this.phaseAt > MOVE_MS) { this.phase = 'visiting'; this.phaseAt = this.t; }
     else if (this.phase === 'visiting' && this.t - this.phaseAt > this.visitMs) {
       this.moveFrom = { c: { ...this.visitTo! }, scale: this.slotScale };
@@ -363,6 +413,11 @@ export class Doodle implements Creature {
     if (this.phase === 'parked') return { c: slot, scale: s, energy: 0.3 };
     if (this.phase === 'toVisit') { const f = this.moveFrom ?? { c: slot, scale: s }, v = this.visitTo!; return { c: { x: f.c.x + (v.x - f.c.x) * e, y: f.c.y + (v.y - f.c.y) * e }, scale: f.scale + (s - f.scale) * e, energy: 0.7 }; }
     if (this.phase === 'visiting') return { c: this.visitTo!, scale: s, energy: 0.7 };
+    if (this.phase === 'directed') {
+      const sc = this.slot ? s : 1;
+      if (this.rideOn) { const o = this.rideOn.on.where; return { c: { x: o.x + this.rideOn.dx, y: o.y + this.rideOn.dy }, scale: sc, energy: 0.5 }; }
+      if (this.goal) { const k = Math.min(1, (this.t - this.goal.at) / this.goal.ms), q = k * k * (3 - 2 * k); return { c: { x: this.goal.from.x + (this.goal.to.x - this.goal.from.x) * q, y: this.goal.from.y + (this.goal.to.y - this.goal.from.y) * q }, scale: sc, energy: 0.7 }; }
+    }
     if (this.phase === 'toStage') return { c: { x: slot.x + (this.home.x - slot.x) * e, y: slot.y + (this.home.y - slot.y) * e }, scale: s + (1 - s) * e, energy: 1 };
     return { c: this.home, scale: 1, energy: 1 };
   }

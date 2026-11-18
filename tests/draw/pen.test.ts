@@ -9,64 +9,52 @@ const run = (pen: LaserPen, from: number, to: number, f: (t: number) => { x: num
 };
 const arc = (t0: number, x0: number) => (t: number) => ({ x: x0 + (t - t0) * 0.15, y: 300 + Math.sin((t - t0) / 300) * 40 });
 
-describe('LaserPen with gestures', () => {
-  it('pointing for a moment turns the pen on (with a burst)', () => {
+describe('LaserPen: one line, drawn by the fingertip alone', () => {
+  it('pointing and resting a moment turns the pen on (with a burst)', () => {
     const pen = new LaserPen();
     expect(run(pen, 0, 200, () => ({ x: 500, y: 300 })).mode).toBe('arming');
-    const s = run(pen, 233, 600, () => ({ x: 500, y: 300 }));
-    expect(s.mode).toBe('down');
+    expect(run(pen, 233, 600, () => ({ x: 500, y: 300 })).mode).toBe('down');
     expect(pen.takeBursts().some((b) => b.kind === 'start')).toBe(true);
   });
-
   it('reaching in while pointing does not draw from the edge: the pen waits until the finger rests', () => {
     const pen = new LaserPen();
-    expect(run(pen, 0, 900, (t) => ({ x: 100 + t * 0.4, y: 300 })).mode).toBe('arming'); // sweeping in
-    expect(run(pen, 933, 1400, () => ({ x: 470, y: 300 })).mode).toBe('down'); // stops: pen on, right there
-    expect(pen.update({ tip: { x: 470, y: 300 }, pose: 'point' }, 1433).strokes[0][0].x).toBeGreaterThan(440);
+    expect(run(pen, 0, 900, (t) => ({ x: 100 + t * 0.4, y: 300 })).mode).toBe('arming');
+    expect(run(pen, 933, 1400, () => ({ x: 470, y: 300 })).mode).toBe('down');
   });
-  it('an open hand or fist never turns the pen on', () => {
+  it('an open hand or a fist never turns the pen on', () => {
     const pen = new LaserPen();
-    expect(run(pen, 0, 2000, () => ({ x: 500, y: 300 }), 'open').mode).toBe('idle');
-    expect(run(pen, 2033, 4000, () => ({ x: 500, y: 300 }), 'fist').mode).toBe('idle');
+    expect(run(pen, 0, 1000, () => ({ x: 500, y: 300 }), 'open').mode).toBe('idle');
+    expect(run(pen, 1033, 2000, () => ({ x: 500, y: 300 }), 'fist').mode).toBe('idle');
   });
-
-  it('draws a smooth line while pointing', () => {
+  it('draws one line while pointing', () => {
     const pen = new LaserPen();
     run(pen, 0, 600, () => ({ x: 500, y: 300 }));
-    const s = run(pen, 633, 2300, (t) => ({ x: 500 + (t - 633) * 0.3 + (Math.round(t / 33) % 2) * 3, y: 300 }));
-    const line = s.strokes.at(-1)!;
-    expect(line.length).toBeGreaterThan(20);
-    expect(Math.max(...line.map((p) => Math.abs(p.y - 300)))).toBeLessThan(2);
+    const s = run(pen, 633, 2000, arc(633, 500));
+    expect(s.strokes.length).toBe(1);
+    expect(s.strokes[0].length).toBeGreaterThan(20);
   });
-
-  it('an open hand lifts the pen; pointing again starts a new stroke', () => {
+  it('the fingertip hidden over the hand\'s own shadow: the pen waits (no jump, no ink), then carries on — still one line', () => {
     const pen = new LaserPen();
     run(pen, 0, 600, () => ({ x: 500, y: 300 }));
-    run(pen, 633, 1600, arc(633, 500));
-    expect(run(pen, 1633, 2500, (t) => ({ x: 500 + (t - 1633) * 0.23, y: 300 - (t - 1633) * 0.1 }), 'open').mode).toBe('up');
-    const s = run(pen, 2533, 3500, arc(2533, 700));
-    expect(Math.max(...s.strokes[0].map((p) => p.x))).toBeLessThan(660); // nothing drawn while the hand was open
-    expect(s.strokes.length).toBe(2);
-    expect(s.strokes[1][0].x).toBeGreaterThan(650); // no ink where the hand moved while open
+    run(pen, 633, 1500, arc(633, 500));
+    const before = run(pen, 1533, 1533, arc(633, 500));
+    const n = before.strokes[0].length, cur = { ...before.cursor! };
+    const hidden = run(pen, 1566, 2400, () => ({ x: 380, y: 420 }), 'open'); // "tip" now somewhere on the palm
+    expect(hidden.mode).toBe('down');
+    expect(hidden.strokes[0].length).toBe(n); // no ink while hidden
+    expect(Math.hypot(hidden.cursor!.x - cur.x, hidden.cursor!.y - cur.y)).toBeLessThan(1); // and no jump
+    const after = run(pen, 2433, 3000, arc(1500, 640));
+    expect(after.strokes.length).toBe(1);
+    expect(after.strokes[0].length).toBeGreaterThan(n);
   });
-
-  it('curl the finger (a fist) to lift the pen, point again for a new stroke (eyes!)', () => {
-    const pen = new LaserPen();
-    run(pen, 0, 600, () => ({ x: 500, y: 300 }));
-    run(pen, 633, 1600, arc(633, 500));
-    const up = run(pen, 1633, 2200, (t) => ({ x: 700 + (t - 1633) * 0.2, y: 200 }), 'fist'); // curled, moving to the eyes
-    expect(up.mode).toBe('up');
-    expect(up.finish).toBeGreaterThan(0);
-    const s = run(pen, 2233, 2800, (t) => ({ x: 820 + (t - 2233) * 0.05, y: 200 }));
-    expect(s.mode).toBe('down');
-    expect(s.strokes.length).toBe(2);
-    expect(Math.max(...s.strokes[0].map((p) => p.x))).toBeLessThan(700); // nothing drawn while curled
-  });
-  it('holding the fist finishes the drawing and hands it over once, with a burst', () => {
+  it('resting the fingertip still finishes the drawing (a ring fills), once, with a burst', () => {
     const pen = new LaserPen();
     run(pen, 0, 600, () => ({ x: 500, y: 300 }));
     run(pen, 633, 2000, arc(633, 500));
-    const s = run(pen, 2033, 3600, () => ({ x: 700, y: 310 }), 'fist');
+    const resting = run(pen, 2033, 2900, () => ({ x: 705, y: 310 }));
+    expect(resting.mode).toBe('down');
+    expect(resting.finish).toBeGreaterThan(0.3);
+    const s = run(pen, 2933, 3700, () => ({ x: 705, y: 310 }));
     expect(s.mode).toBe('idle');
     const done = pen.takeFinished()!;
     expect(done.length).toBe(1);
@@ -74,42 +62,22 @@ describe('LaserPen with gestures', () => {
     expect(pen.takeFinished()).toBeNull();
     expect(pen.takeBursts().some((b) => b.kind === 'finish')).toBe(true);
   });
-
   it('pulling the hand out of the light also finishes, without the slide back along the finger', () => {
     const pen = new LaserPen();
     run(pen, 0, 600, () => ({ x: 500, y: 300 }));
-    run(pen, 633, 2633, arc(633, 500));
-    run(pen, 2666, 3600, (t) => ({ x: 800 - (t - 2666) * 0.4, y: 300 })); // slides back along the finger
-    run(pen, 3633, 4600, () => null);
+    run(pen, 633, 2000, arc(633, 500));
+    run(pen, 2033, 2300, (t) => ({ x: 700 - (t - 2033) * 1.5, y: 300 }), 'point', { x: 1, y: 0 }); // retreating fast
+    run(pen, 2333, 3400, () => null);
     const done = pen.takeFinished()!;
-    expect(Math.min(...done.flat().map((p) => p.x))).toBeGreaterThan(480);
+    expect(Math.max(...done[0].map((p) => p.x))).toBeGreaterThan(680);
+    expect(done[0][done[0].length - 1].x).toBeGreaterThan(600);
   });
-
   it('ignores a one-frame jump across the wall', () => {
     const pen = new LaserPen();
     run(pen, 0, 600, () => ({ x: 500, y: 300 }));
-    run(pen, 633, 1600, (t) => ({ x: 500 + (t - 633) * 0.2, y: 300 }));
-    pen.update({ tip: { x: 1500, y: 900 }, pose: 'point', dir: { x: 1, y: 0 } }, 1633);
-    const s = pen.update({ tip: { x: 696, y: 300 }, pose: 'point', dir: { x: 1, y: 0 } }, 1666);
-    expect(Math.max(...s.strokes.flat().map((p) => p.x))).toBeLessThan(800);
-  });
-
-  it('a brief wobble of the pose does not lift the pen', () => {
-    const pen = new LaserPen();
-    run(pen, 0, 600, () => ({ x: 500, y: 300 }));
     run(pen, 633, 1300, arc(633, 500));
-    run(pen, 1333, 1366, arc(633, 500), 'open'); // two frames
-    const s = run(pen, 1399, 2000, arc(633, 500));
-    expect(s.strokes.length).toBe(1);
-  });
-  it('a pose that flickers between point and open while drawing does not break the line', () => {
-    const pen = new LaserPen();
-    run(pen, 0, 600, () => ({ x: 500, y: 300 }));
-    for (let t0 = 633; t0 < 2600; t0 += 400) {
-      run(pen, t0, t0 + 180, arc(633, 500), 'point');
-      run(pen, t0 + 200, t0 + 380, arc(633, 500), 'open'); // ~200 ms of "open" at a time
-    }
-    expect(pen.update({ tip: arc(633, 500)(2633), pose: 'point' }, 2633).strokes.length).toBe(1);
+    const s = run(pen, 1333, 1333, () => ({ x: 1500, y: 900 }));
+    expect(Math.max(...s.strokes[0].map((p) => p.x))).toBeLessThan(700);
   });
   it('a shaky fingertip draws a steady line (lazy brush)', () => {
     const pen = new LaserPen();
@@ -118,8 +86,7 @@ describe('LaserPen with gestures', () => {
     const shaky = (t: number) => ({ x: 400 + (t - 633) * 0.3, y: 300 + ((k++ * 7919) % 13) - 6 }); // ±6 px tremor
     const s = run(pen, 633, 2600, shaky);
     const ys = s.strokes[0].slice(3).map((p) => p.y);
-    const wobble = Math.max(...ys) - Math.min(...ys);
-    expect(wobble).toBeLessThan(5); // the tremor was 12 px peak to peak
-    expect(Math.max(...s.strokes[0].map((p) => p.x))).toBeGreaterThan(900); // and it still goes where you point
+    expect(Math.max(...ys) - Math.min(...ys)).toBeLessThan(5);
+    expect(Math.max(...s.strokes[0].map((p) => p.x))).toBeGreaterThan(900);
   });
 });

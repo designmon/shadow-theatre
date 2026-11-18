@@ -8,7 +8,12 @@ import { bilinear } from './vision/fingers';
 import { compositionArea, drawDecor, layout, type Decor } from './draw/composition';
 import { pauseIcon, WallButton } from './ui/wallButton';
 import { Clicker } from './ui/clicker';
-import { Director, drawCaption } from './story/director';
+import { Director, StoryLog } from './story/director';
+import { ScriptRunner, type Plan } from './story/script';
+import { VoiceInput } from './voice/voice';
+import { StopSign, WaveDetector } from './vision/gestures';
+import { ListeningUI } from './ui/listening';
+import { zoneOf } from './draw/composition';
 import { exportDrawing, exportScene } from './runway/export';
 import { ClipPlayer, watchClips, type ClipEvent } from './runway/clips';
 import { Checklist, describeHealth, type Health } from './setup/checklist';
@@ -82,7 +87,41 @@ const pauseButton = new WallButton(['pause', 'play'], pauseIcon);
 const clicker = new Clicker();
 // little stories between the drawings, and what a drawing does when you click it
 const director = new Director(() => creatures.filter((c): c is Doodle => c instanceof Doodle && !c.retiring), () => performance.now());
-let handAtWall: { x: number; y: number } | null = null; // where the hand is on the wall (fingertip, or palm for a fist)
+let handAtWall: { x: number; y: number } | null = null;
+// voice commands: wave to talk, a stop sign (or send) to submit; the drawings act it out
+const story = new StoryLog();
+const voice = new VoiceInput();
+const waveDetector = new WaveDetector();
+const stopSign = new StopSign();
+const listeningUI = new ListeningUI();
+let thinking = false;
+let lastCaptionAt = -1;
+const runner = new ScriptRunner(() => stage.size(), () => compositionArea(stage.size()), () => performance.now());
+function startListening(): void {
+  if (voice.listening || thinking) return;
+  void voice.start();
+  stopSign.reset();
+}
+async function submitVoice(): Promise<void> {
+  if (!voice.listening) return;
+  const text = voice.stop();
+  if (!text) return;
+  thinking = true;
+  const ds = creatures.filter((c): c is Doodle => c instanceof Doodle && !c.retiring && !!c.id);
+  const { w, h } = stage.size();
+  const items = ds.map((d) => ({ id: d.id, label: d.what, x: +(d.where.x / w).toFixed(2), y: +(d.where.y / h).toFixed(2), zone: zoneOf(d.what), selected: d.selected }));
+  try {
+    const r = await fetch('/api/command', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text, items }) });
+    const plan = (await r.json()) as Plan;
+    if (plan.story) story.add(plan.story, performance.now());
+    runner.play(plan, ds);
+  } catch {
+    story.add('(could not reach the server)', performance.now());
+  } finally {
+    thinking = false;
+    for (const d of ds) d.selected = false;
+  }
+} // where the hand is on the wall (fingertip, or palm for a fist)
 let fistFrames = 0;
 function setPaused(on: boolean): void {
   if (pauseButton.on !== on) pauseButton.click(performance.now());
@@ -117,16 +156,6 @@ function bringDrawingToLife(strokes: { x: number; y: number }[][]): void {
       doodle.comeAlive(motion, rec.what); // your own line, refined, with the motion that fits it
       compose(); // its place in the composition (it goes there after performing)
       director.nudge(9000); // and soon a little scene with the others
-      // not sure what it is? it asks you (a quick fist on the answer)
-      const alts = (rec as { alternatives?: { what: string; p: number }[] }).alternatives ?? [];
-      if (rec.confidence < 0.55 && alts.length >= 2 && alts[1].p > 0.12) {
-        const options = [...new Set([rec.what, ...alts.map((a) => a.what)])].filter((w) => w !== 'something').slice(0, 2);
-        if (options.length === 2) setTimeout(() => director.askWhat(doodle, options, (what) => {
-          doodle.comeAlive(motionFor(what, rec.motion), what);
-          compose();
-          setTimeout(() => void exportDrawing(doodle), 1600);
-        }), 1800);
-      }
       // also save it for Runway (captures/runway-in/<id>.png + prompt), once the clean drawing is in
       setTimeout(() => void exportDrawing(doodle).then((id) => { if (id) matchClips(doodle); }), 1600);
     });
@@ -357,6 +386,7 @@ async function main() {
       void exportScene(doodles(), stage.size(), { w: stage.canvas.width, h: stage.canvas.height }).then((name) => say(name ? `saved for Runway: ${name}` : 'could not save — is the server running?'));
     }
     if (k === 'p') setPaused(!pauseButton.on);
+    if (k === 'm') { if (voice.listening) void submitVoice(); else startListening(); } // the keyboard way to talk
     if (k === 'v') { if (latestScene) playScene(latestScene); else say('no scene clip yet — drop one into captures/runway-out/'); }
     if (k === 'c') calibrate();
     if (k === 's') panel!.show(!panel!.visible);
@@ -440,20 +470,25 @@ async function main() {
         // a click (quick fist): the pause button, an answer in a bubble, or a drawing
         const wall = stage.size(), ds = doodles();
         if (pauseButton.hit(click, wall)) { setPaused(!pauseButton.on); sparkles.burst(pauseButton.centre(wall), 10, 60); }
-        else if (ds.some((d) => d.answerAt(click))) sparkles.burst(click, 8, 50);
+        else if (voice.listening && listeningUI.hitSend(click)) void submitVoice();
         else {
+          // a drawing: select it (or let it go) — "this", "it" in what you say next
           const d = ds.filter((x) => !x.retiring && x.what && x.hit(click)).sort((a, b) => Math.hypot(a.where.x - click.x, a.where.y - click.y) - Math.hypot(b.where.x - click.x, b.where.y - click.y))[0];
-          if (d) { director.clicked(d); sparkles.burst(d.anchor(), 8, 40); }
+          if (d) { d.selected = !d.selected; sparkles.burst(d.anchor(), 8, 40); }
         }
       }
-      const atButton = penFree && (pauseButton.hovered || (!!handAt && doodles().some((d) => d.overBubble(handAt))));
+      // voice: wave to start listening; a stop sign to send
+      const openHand = scene?.pose === 'open';
+      if (penFree && !voice.listening && !thinking && waveDetector.feed(handAt, openHand, now)) startListening();
+      if (voice.listening && stopSign.feed(handAt, openHand, now)) void submitVoice();
+      const atButton = penFree && (pauseButton.hovered || voice.listening || (!!handAt && listeningUI.near(handAt, stage.size())));
       penState = pen.update(tipProj && scene && !resting && !atButton ? { tip: tipProj, pose: scene.pose, dir: dirProj } : null, now);
       const finished = pen.takeFinished();
       if (finished) bringDrawingToLife(finished);
       for (const b of pen.takeBursts()) sparkles.burst(b.at, b.kind === 'finish' ? 16 : 10, b.kind === 'finish' ? 140 : 70);
       if (penState.mode === 'down' && penState.cursor) sparkles.trail(penState.cursor, dt); else sparkles.lift();
       if (scene?.pointing) lastPointingAt = now;
-      if ((window as any).__trace) { (window as any).__mask = mask; (window as any).__lit = lit; (window as any).__handSeen = !!scene; (window as any).__doodles = doodles; (window as any).__wallClip = () => wallClip; (window as any).__paused = () => pauseButton.on; (window as any).__caption = () => director.caption; (window as any).__btn = () => ({ tip: scene?.pose === 'fist' && scene.palm && calib ? applyH(calib.camToProj, scene.palm) : rawTip, hov: pauseButton.hovered, c: pauseButton.centre(stage.size()), pose: scene?.pose, fistFrames }); }
+      if ((window as any).__trace) { (window as any).__mask = mask; (window as any).__lit = lit; (window as any).__handSeen = !!scene; (window as any).__doodles = doodles; (window as any).__wallClip = () => wallClip; (window as any).__paused = () => pauseButton.on; (window as any).__caption = () => director.caption; (window as any).__story = () => story.last; (window as any).__voice = () => ({ listening: voice.listening, thinking }); (window as any).__runner = runner; (window as any).__playPlan = (p: Plan) => { story.add(p.story, performance.now()); runner.play(p, doodles()); }; (window as any).__btn = () => ({ tip: scene?.pose === 'fist' && scene.palm && calib ? applyH(calib.camToProj, scene.palm) : rawTip, hov: pauseButton.hovered, c: pauseButton.centre(stage.size()), pose: scene?.pose, fistFrames }); }
       if ((window as any).__trace) console.log('[trace]', Math.round(now), scene ? `pointing=${scene.pointing} tip=${Math.round(scene.tip.x)},${Math.round(scene.tip.y)} box=${JSON.stringify(scene.puppetBox)} usable=${!!usable}` : 'no scene', penState.mode, scene?.pose ?? '');
       const penNearby = penState.mode !== 'idle' || now - lastPointingAt < POINTING_QUIET_MS;
       if (penNearby) hold.reset(); // a pointing finger is a pen, not a puppet
@@ -483,7 +518,9 @@ async function main() {
     const alive = creatures.filter((c) => !c.retiring);
     for (let i = 0; i < alive.length - MAX_CREATURES; i++) alive[i].retire();
     for (const c of creatures) c.update(dt);
-    director.update(pauseButton.on);
+    director.update(pauseButton.on || runner.busy);
+    runner.update();
+    if (director.caption && director.caption.at !== lastCaptionAt) { lastCaptionAt = director.caption.at; story.add(director.caption.text, director.caption.at); }
     sparkles.update(dt);
     let gone = false;
     for (let i = creatures.length - 1; i >= 0; i--) if (creatures[i].done) { creatures.splice(i, 1); gone = true; }
@@ -512,8 +549,15 @@ async function main() {
     if (decor) drawDecor(stage.ctx, decor, INK_COLOR, pauseButton.on ? 0 : now, veil);
     for (const c of creatures) c.draw(stage.ctx);
     pauseButton.draw(stage.ctx, stage.size(), INK_COLOR, accentAt, now);
-    for (const d of doodles()) d.drawSpeech(stage.ctx, stage.size(), handAtWall);
-    { const area = compositionArea(stage.size()); drawCaption(stage.ctx, director.caption, area.x + area.w / 2, Math.min(stage.size().h - 14, area.y + area.h + 26), INK_COLOR, now); }
+    { const placed: { x: number; y: number; w: number; h: number }[] = []; for (const d of doodles()) { const b = d.drawSpeech(stage.ctx, stage.size(), handAtWall, placed); if (b) placed.push(b); } }
+    // selected drawings: a soft ring (what "this" means in a voice command)
+    for (const d of doodles()) if (d.selected && !d.retiring) {
+      const b = d.box(), c = stage.ctx;
+      c.save(); c.strokeStyle = `rgba(${accentAt((Math.sin(now / 500) + 1) / 2)},0.9)`; c.lineWidth = 2; c.setLineDash([6, 6]);
+      c.beginPath(); c.ellipse(b.x + b.w / 2, b.y + b.h / 2, b.w / 2 + 18, b.h / 2 + 18, 0, 0, Math.PI * 2); c.stroke(); c.restore();
+    }
+    listeningUI.draw(stage.ctx, stage.size(), { listening: voice.listening, thinking, text: voice.text, level: voice.level(), error: voice.error, stop: stopSign.progress(now) }, INK_COLOR, now);
+    story.draw(stage.ctx, stage.size(), INK_COLOR, now);
     if (note) {
       const a = Math.min(1, (now - note.at) / 250) * Math.min(1, (3200 - (now - note.at)) / 500);
       if (a <= 0) note = null;

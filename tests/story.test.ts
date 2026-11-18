@@ -24,28 +24,40 @@ describe('stories between the drawings', () => {
     now = 4000; for (let t = 0; t < 4000; t += 50) { dog.update(50); cat.update(50); } dir.update(false);
     expect(dog.bubble || cat.bubble).toBeTruthy(); // and they talk
   });
-  it('a drawing you click asks you something, and your answer decides what happens', () => {
-    const [dog] = cast('dog');
-    const dir = new Director(() => [dog], () => 0);
-    dir.clicked(dog);
-    expect(dog.bubble?.options).toEqual(['Fetch!', 'Nap']);
-    dog.bubble!.onAnswer!('Nap');
-    expect(dog.bubble?.text).toBe('zzz');
-    expect(dir.caption?.text).toBe('The dog takes a nap.');
-  });
-  it('not sure what it is: it asks, and becomes your answer', () => {
-    const [d] = cast('cat');
-    const dir = new Director(() => [d], () => 0);
-    let became = '';
-    dir.askWhat(d, ['cat', 'dog'], (w) => (became = w));
-    expect(d.bubble?.text).toBe('Am I a cat or a dog?');
-    d.bubble!.onAnswer!('dog');
-    expect(became).toBe('dog');
-  });
+
+
   it('paused: no stories', () => {
     const [dog, cat] = cast('dog', 'cat');
     const dir = new Director(() => [dog, cat], () => 0);
     dir.update(true);
     expect(dir.caption).toBeNull();
+  });
+});
+
+import { ScriptRunner } from '../src/story/script';
+
+describe('voice commands acted out', () => {
+  it('"the plane lands, the fish gets on, and they fly off" — and later they come back', () => {
+    const [plane, fish] = cast('plane', 'fish');
+    let now = 0;
+    const tick = (ms: number) => { for (let t = 0; t < ms; t += 50) { now += 50; plane.update(50); fish.update(50); runner.update(); } };
+    const runner = new ScriptRunner(() => ({ w: 1920, h: 1080 }), () => ({ x: 1150, y: 280, w: 710, h: 745 }), () => now);
+    runner.play({ story: 'The plane lands and the fish climbs aboard. Off they fly!', steps: [
+      { do: 'goto', who: plane.id, place: 'ground' },
+      { do: 'goto', who: fish.id, near: plane.id },
+      { do: 'ride', who: fish.id, on: plane.id },
+      { do: 'say', who: fish.id, text: 'All aboard!' },
+      { do: 'leave', who: plane.id, side: 'right' },
+    ] }, [plane, fish]);
+    tick(2000);
+    expect(plane.where.y).toBeGreaterThan(900); // landed
+    tick(2000);
+    expect(fish.riding).toBe(plane);
+    tick(4500);
+    expect(plane.where.x).toBeGreaterThan(1920); // off the wall…
+    expect(fish.where.x).toBeGreaterThan(1920); // …with its passenger
+    tick(12000);
+    expect(plane.where.x).toBeLessThan(1920); // and back home
+    expect(fish.riding).toBeNull();
   });
 });

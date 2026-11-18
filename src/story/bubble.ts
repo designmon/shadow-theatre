@@ -18,7 +18,7 @@ const PAD = 12, CHIP_H = 30, GAP = 8;
 
 export type BubbleLayout = { box: Box; chips: { option: string; box: Box }[] };
 
-function measure(ctx: CanvasRenderingContext2D, b: Bubble, anchor: Pt, wall: { w: number; h: number }): BubbleLayout {
+function measure(ctx: CanvasRenderingContext2D, b: Bubble, anchor: Pt, wall: { w: number; h: number }, avoid: Box[] = []): BubbleLayout {
   ctx.save();
   ctx.font = FONT;
   const textW = ctx.measureText(b.text).width;
@@ -27,14 +27,21 @@ function measure(ctx: CanvasRenderingContext2D, b: Bubble, anchor: Pt, wall: { w
   const chipsW = chipWs.reduce((a, c) => a + c, 0) + Math.max(0, chipWs.length - 1) * GAP;
   const w = Math.max(textW, chipsW) + PAD * 2, h = PAD * 2 + 20 + (b.options?.length ? CHIP_H + 10 : 0);
   // above the drawing, kept on the wall
-  const x = Math.min(wall.w - w - 10, Math.max(10, anchor.x - w / 2)), y = Math.max(10, anchor.y - h - 18);
+  const x = Math.min(wall.w - w - 10, Math.max(10, anchor.x - w / 2));
+  let y = Math.max(10, anchor.y - h - 18);
+  // don't sit on another bubble: move up above it
+  for (let tries = 0; tries < 6; tries++) {
+    const hit = avoid.find((o) => x < o.x + o.w + 6 && x + w > o.x - 6 && y < o.y + o.h + 6 && y + h > o.y - 6);
+    if (!hit) break;
+    y = hit.y - h - 10;
+  }
   let cx = x + (w - chipsW) / 2;
   const chips = (b.options ?? []).map((option, i) => { const box = { x: cx, y: y + PAD + 30, w: chipWs[i], h: CHIP_H }; cx += chipWs[i] + GAP; return { option, box }; });
   return { box: { x, y, w, h }, chips };
 }
 
-export function drawBubble(ctx: CanvasRenderingContext2D, b: Bubble, anchor: Pt, wall: { w: number; h: number }, ink: string, now: number, hoverAt?: Pt | null): BubbleLayout {
-  const L = measure(ctx, b, anchor, wall);
+export function drawBubble(ctx: CanvasRenderingContext2D, b: Bubble, anchor: Pt, wall: { w: number; h: number }, ink: string, now: number, hoverAt?: Pt | null, avoid: Box[] = []): BubbleLayout {
+  const L = measure(ctx, b, anchor, wall, avoid);
   const age = now - b.at, a = Math.min(1, age / 220) * Math.min(1, (b.ms - age) / 400);
   if (a <= 0) return L;
   const { x, y, w, h } = L.box;
