@@ -10,7 +10,8 @@ export type Step =
   | { do: 'home'; who: string }
   | { do: 'say'; who: string; text: string }
   | { do: 'trick'; who: string; kind: 'jump' | 'spin' | 'shake' | 'grow' | 'rain' }
-  | { do: 'wait'; ms: number };
+  | { do: 'wait'; ms: number }
+  | { do: 'draw'; what: string; place?: string; near?: string };
 export type Plan = { story: string; steps: Step[]; note?: string };
 
 const TRICK_MS = { jump: 750, spin: 900, shake: 700, grow: 900, rain: 2600 };
@@ -23,10 +24,13 @@ export class ScriptRunner {
   private cast = new Map<string, Doodle>();
   private actors = new Set<Doodle>();
   private endAt: number | null = null;
+  private waiting = false;
+  /** Draw something new (the AI finger); resolves with the new drawing. */
+  onDraw: ((what: string, at: Pt) => Promise<Doodle | null>) | null = null;
 
   constructor(private readonly wall: () => { w: number; h: number }, private readonly area: () => Box, private readonly now: () => number) {}
 
-  get busy(): boolean { return this.steps.length > 0 || (this.endAt !== null && this.now() < this.endAt); }
+  get busy(): boolean { return this.waiting || this.steps.length > 0 || (this.endAt !== null && this.now() < this.endAt); }
 
   play(plan: Plan, doodles: Doodle[]): void {
     this.cast = new Map(doodles.filter((d) => d.id).map((d) => [d.id, d]));
@@ -38,16 +42,27 @@ export class ScriptRunner {
 
   update(): void {
     const now = this.now();
-    while (this.steps.length && now >= this.nextAt) {
+    while (!this.waiting && this.steps.length && now >= this.nextAt) {
       const s = this.steps.shift()!;
       this.nextAt = now + this.run(s);
     }
-    if (!this.steps.length && this.actors.size && this.endAt === null) this.endAt = now + SETTLE_BACK_MS;
+    if (!this.waiting && !this.steps.length && this.actors.size && this.endAt === null) this.endAt = now + SETTLE_BACK_MS;
     if (this.endAt !== null && now >= this.endAt) {
       for (const d of this.actors) if (d.directed && !d.riding) d.goHome();
       this.actors.clear();
       this.endAt = null;
     }
+  }
+
+  /** Where to draw something new for a place word. */
+  private placeFor(name: string): Pt {
+    const { w, h } = this.wall(), A = this.area();
+    if (name === 'sky' || name === 'top') return { x: w * 0.33, y: h * 0.25 };
+    if (name === 'ground' || name === 'bottom') return { x: w * 0.33, y: h * 0.62 };
+    if (name === 'water') return { x: A.x + A.w / 2, y: A.y + A.h * 0.85 };
+    if (name === 'left') return { x: w * 0.2, y: h * 0.45 };
+    if (name === 'right') return { x: w * 0.5, y: h * 0.45 };
+    return { x: w * 0.33, y: h * 0.45 };
   }
 
   /** Where a place on the wall is. */
@@ -69,6 +84,15 @@ export class ScriptRunner {
   /** Do one step; returns how long until the next one (ms). */
   private run(s: Step): number {
     if (s.do === 'wait') return s.ms;
+    if (s.do === 'draw') {
+      if (!this.onDraw) return 0;
+      const { w, h } = this.wall();
+      const near = s.near ? this.cast.get(s.near) : null;
+      const at = near ? { x: near.where.x - near.box().w - 160, y: near.where.y } : s.place && s.place !== 'center' ? this.placeFor(s.place) : { x: w * 0.33, y: h * 0.45 };
+      this.waiting = true;
+      void this.onDraw(s.what, at).then((d) => { if (d) this.cast.set('new', d); }).finally(() => { this.waiting = false; this.nextAt = this.now() + 400; });
+      return 0;
+    }
     const d = this.cast.get(s.who);
     if (!d) return 0;
     this.actors.add(d);

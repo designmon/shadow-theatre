@@ -13,6 +13,8 @@ import { ScriptRunner, type Plan } from './story/script';
 import { VoiceInput } from './voice/voice';
 import { StopSign, WaveDetector } from './vision/gestures';
 import { ListeningUI } from './ui/listening';
+import { AiArtist } from './draw/aiHand';
+import { fitIcon, ICONS } from './draw/icons';
 import { zoneOf } from './draw/composition';
 import { exportDrawing, exportScene } from './runway/export';
 import { ClipPlayer, watchClips, type ClipEvent } from './runway/clips';
@@ -97,6 +99,32 @@ const listeningUI = new ListeningUI();
 let thinking = false;
 let lastCaptionAt = -1;
 const runner = new ScriptRunner(() => stage.size(), () => compositionArea(stage.size()), () => performance.now());
+// "draw a cat": the AI's finger comes in and draws it, then it comes alive like yours
+const artist = new AiArtist();
+runner.onDraw = async (what, at) => {
+  const { w, h } = stage.size(), size = h * 0.28;
+  const label = what.trim().split(' ').pop() ?? what; // "a big cat" -> cat
+  let strokes: { x: number; y: number }[][] | null = null;
+  const icon = ICONS[label] ? fitIcon(label, { cx: at.x, cy: at.y, w: size, h: size }) : null;
+  if (icon) strokes = icon.map((st) => (st.closed ? [...st.pts, st.pts[0]] : st.pts));
+  else {
+    // nothing ready-made: the model sketches it
+    try {
+      const r = await (await fetch('/api/sketch', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ what }) })).json();
+      if (Array.isArray(r.strokes)) strokes = r.strokes.map((st: number[][]) => st.map(([x, y]) => ({ x: at.x + ((x - 50) / 100) * size, y: at.y + ((y - 50) / 100) * size })));
+    } catch { /* below */ }
+  }
+  if (!strokes?.length) { story.add(`(I don't know how to draw a ${what} yet)`, performance.now()); return null; }
+  return new Promise((resolve) => artist.start(strokes!, { w, h }, (drawn) => {
+    const d = new Doodle(drawn, { w, h });
+    d.frozen = pauseButton.on;
+    creatures.push(d);
+    d.comeAlive(motionFor(label, 'float'), label, !!icon);
+    compose();
+    setTimeout(() => void exportDrawing(d), 1600);
+    resolve(d);
+  }));
+};
 function startListening(): void {
   if (voice.listening || thinking) return;
   void voice.start();
@@ -349,7 +377,7 @@ async function main() {
       const blocked = calibrationWarning(wall, lit, calib.whiteRef);
       const litBefore = countOnes(lit);
       for (let i = 0; i < lit.data.length; i++) lit.data[i] &= wall.data[i];
-      lit = wallInterior(lit, 3); // the border between picture and bare wall is not a shadow
+      lit = wallInterior(lit, 2); // the border between picture and bare wall is not a shadow (kept thin: you draw near the edges too)
       // diagnostics for the debug view: what the calibration thinks the wall is
       const n = lit.data.length, med = (g: Gray) => { const v: number[] = []; for (let i = 0; i < n; i += 5) if (lit!.data[i]) v.push(g.data[i]); v.sort((a, b) => a - b); return v.length ? v[v.length >> 1] : 0; };
       calibInfo = `wall ${Math.round((100 * countOnes(wall)) / n)}% of view · lit ${Math.round((100 * litBefore) / n)}% → ${Math.round((100 * countOnes(lit)) / n)}% · white ${med(calib.whiteRef)} / black ${med(calib.dark)}`;
@@ -520,6 +548,7 @@ async function main() {
     for (const c of creatures) c.update(dt);
     director.update(pauseButton.on || runner.busy);
     runner.update();
+    artist.update(dt);
     if (director.caption && director.caption.at !== lastCaptionAt) { lastCaptionAt = director.caption.at; story.add(director.caption.text, director.caption.at); }
     sparkles.update(dt);
     let gone = false;
@@ -556,6 +585,7 @@ async function main() {
       c.save(); c.strokeStyle = `rgba(${accentAt((Math.sin(now / 500) + 1) / 2)},0.9)`; c.lineWidth = 2; c.setLineDash([6, 6]);
       c.beginPath(); c.ellipse(b.x + b.w / 2, b.y + b.h / 2, b.w / 2 + 18, b.h / 2 + 18, 0, 0, Math.PI * 2); c.stroke(); c.restore();
     }
+    artist.draw(stage.ctx, INK_COLOR, accentAt(0.5));
     listeningUI.draw(stage.ctx, stage.size(), { listening: voice.listening, thinking, text: voice.text, level: voice.level(), error: voice.error, stop: stopSign.progress(now) }, INK_COLOR, now);
     story.draw(stage.ctx, stage.size(), INK_COLOR, now);
     if (note) {

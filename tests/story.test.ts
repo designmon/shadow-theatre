@@ -61,3 +61,34 @@ describe('voice commands acted out', () => {
     expect(fish.riding).toBeNull();
   });
 });
+
+import { AiArtist } from '../src/draw/aiHand';
+
+describe('"draw a cat": the AI finger', () => {
+  it('comes in, draws every stroke, leaves, and hands over the drawing', () => {
+    const a = new AiArtist();
+    let got: unknown = null;
+    const strokes = [[{ x: 500, y: 400 }, { x: 700, y: 400 }], [{ x: 600, y: 300 }, { x: 600, y: 500 }]];
+    a.start(strokes, { w: 1920, h: 1080 }, (s) => (got = s));
+    expect(a.busy).toBe(true);
+    for (let t = 0; t < 6000 && a.busy; t += 16) a.update(16);
+    expect(a.busy).toBe(false);
+    expect(got).toEqual(strokes);
+  });
+  it('a script can draw something new and then move it ("new")', async () => {
+    const [cat] = cast('cat');
+    let now = 0;
+    const runner = new ScriptRunner(() => ({ w: 1920, h: 1080 }), () => ({ x: 1150, y: 280, w: 710, h: 745 }), () => now);
+    const fresh = new Doodle([loop(600)], { w: 1920, h: 1080 });
+    fresh.comeAlive('walk', 'dog', true);
+    fresh.park({ x: 1500, y: 800 }, 0.4);
+    let drew = '';
+    runner.onDraw = async (what) => { drew = what; return fresh; };
+    runner.play({ story: 'A dog appears and says hello to the cat.', steps: [{ do: 'draw', what: 'dog' }, { do: 'say', who: 'new', text: 'Hello!' }] }, [cat]);
+    runner.update();
+    expect(drew).toBe('dog');
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    now += 500; runner.update();
+    expect(fresh.bubble?.text).toBe('Hello!');
+  });
+});

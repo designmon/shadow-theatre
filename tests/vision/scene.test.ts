@@ -316,3 +316,31 @@ describe('fingertip between pixels', () => {
     expect(Math.abs(tip.y - 30.3)).toBeLessThan(0.3);
   });
 });
+
+describe('drawing near the edge, and with the thumb out', () => {
+  const lit = fillRect(mask(W, H), 20, 20, 280, 200, 1);
+  const armAndPalm = () => {
+    const m = mask(W, H);
+    fillRect(m, 20, 112, 90, 14, 1); // forearm from the left edge
+    fillRect(m, 105, 96, 44, 40, 1); // palm
+    return m;
+  };
+  it('a fingertip reaching the bottom edge of the picture is still the fingertip (only the arm comes in from an edge)', () => {
+    const m = armAndPalm();
+    fillRect(m, 122, 136, 9, 84, 1); // finger pointing down, touching the bottom edge
+    const memory = {};
+    analyzeScene(armAndPalm(), findBlobs(armAndPalm()), lit, null, memory); // the arm came in first
+    const s = analyzeScene(m, findBlobs(m), lit, { x: 126, y: 210 }, memory)!;
+    expect(s.pose).toBe('point');
+    expect(s.tip.y).toBeGreaterThan(205);
+  });
+  it('while drawing, a thumb (or another finger) showing up does not stop the pen', () => {
+    const m = armAndPalm();
+    fillRect(m, 149, 104, 42, 9, 1); // the drawing finger
+    fillRect(m, 128, 136, 9, 34, 1); // the thumb, long enough to count as a finger
+    expect(analyzeScene(m, findBlobs(m), lit)!.pose).toBe('open'); // not drawing: two fingers = open
+    const s = analyzeScene(m, findBlobs(m), lit, { x: 188, y: 108 })!; // drawing with the index finger
+    expect(s.pose).toBe('point');
+    expect(s.tip.x).toBeGreaterThan(184);
+  });
+});

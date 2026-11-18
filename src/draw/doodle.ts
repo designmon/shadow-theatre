@@ -191,7 +191,7 @@ export class Doodle implements Creature {
   }
 
   /** It knows what it is: beautify simple shapes, show its name, start performing. */
-  comeAlive(motion: Motion, label = ''): void {
+  comeAlive(motion: Motion, label = '', alreadyClean = false): void {
     this.motion = motion;
     this.label = label;
     const d = this.bornAt, p2 = (v: number) => String(v).padStart(2, '0');
@@ -202,7 +202,7 @@ export class Doodle implements Creature {
     const pts = this.strokes.flatMap((st) => st.base), xs = pts.map((p) => p.x), ys = pts.map((p) => p.y);
     const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
     this.clean = fitIcon(label, { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, w: x1 - x0, h: y1 - y0 });
-    if (this.clean) this.redrawAt = this.aliveAt;
+    if (this.clean) this.redrawAt = alreadyClean ? -1e9 : this.aliveAt; // drawn by the AI finger: already the clean drawing
     else if (this.strokes.length === 1 && this.strokes[0].closed) this.strokes[0].ideal = fitIdeal(label, this.strokes[0].base);
     this.phase = 'performing';
     this.phaseAt = this.aliveAt;

@@ -18,6 +18,8 @@ describe('voice commands', () => {
       { do: 'say', who: 'zz', text: 'hi' }, // nobody
       { do: 'trick', who: 'd3', kind: 'teleport' }, // unknown trick
     ] }, wall)!;
+    const drawn = validPlan({ story: 'A cat appears.', steps: [{ do: 'draw', what: 'Cat!', place: 'ground' }, { do: 'goto', who: 'new', near: 'd3' }] }, wall)!;
+    expect(drawn.steps).toEqual([{ do: 'draw', what: 'cat', place: 'ground' }, { do: 'goto', who: 'new', near: 'd3', above: false, ms: 1600 }]);
     expect(p.story).toBe('Off they go!');
     expect(p.steps.map((s) => s.do)).toEqual(['goto', 'goto', 'ride', 'leave']);
   });
@@ -37,6 +39,8 @@ describe('voice commands', () => {
     expect(simplePlan('the cat jumps', wall).steps).toEqual([{ do: 'trick', who: 'd3', kind: 'jump' }]);
     expect(simplePlan('the fish swims over to the plane', wall).steps[0]).toMatchObject({ do: 'goto', who: 'd2', near: 'd1' });
     expect(simplePlan('make it dance', wall).steps).toEqual([{ do: 'trick', who: 'd3', kind: 'spin' }]); // "it" = selected
+    expect(simplePlan('draw a cat please', wall).steps).toEqual([{ do: 'draw', what: 'cat' }]);
+    expect(simplePlan('add a giraffe', wall).steps).toEqual([{ do: 'draw', what: 'giraffe' }]);
     const failing = vi.fn(async () => new Response('nope', { status: 500 }));
     const p = await planCommand('the cat jumps', wall, 'key', failing as unknown as typeof fetch);
     expect(p.steps[0]).toMatchObject({ do: 'trick', who: 'd3' });

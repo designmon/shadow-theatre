@@ -12,7 +12,7 @@ const STILL_MS = 1400; // ...this long finishes the drawing (a ring fills)
 const HIDDEN_MS = 4000; // the finger hidden in the hand's own shadow: wait this long for it
 const LOST_MS = 900; // no shadow at all this long (hand pulled away) = finished
 const MIN_STEP = 3; // px between stored points
-const STRING = 10; // px: the lazy brush — ink trails the fingertip on a short string, so a tremor never reaches the line
+const STRING = 16; // px: the lazy brush — ink trails the fingertip on a short string, so a tremor never reaches the line
 const MIN_POINTS = 8;
 const MAX_JUMP = 90; // px in one frame: a fingertip can't teleport; such a frame is a glitch
 const RETREAT_SPEED = 1.0; // px/ms: the hand being pulled out of the light, not drawing
@@ -35,7 +35,7 @@ export class LaserPen {
   private times: number[][] = [];
   private finished: Pt[][] | null = null;
   private bursts: Burst[] = [];
-  private filt = new OneEuro2D(1.1, 0.03);
+  private filt = new OneEuro2D(0.8, 0.025);
   private dir: Pt | null = null;
   private lastTip: Pt | null = null;
   private anchor: Pt | null = null; // where arming started / where it has been resting
@@ -55,7 +55,7 @@ export class LaserPen {
     switch (this.mode) {
       case 'idle':
         if (this.doneAt && (!pointing || Math.hypot(tip!.x - this.doneAt.x, tip!.y - this.doneAt.y) > 80)) this.doneAt = null;
-        if (pointing && !this.doneAt) { this.mode = 'arming'; this.since = tMs; this.anchor = { ...tip! }; this.filt = new OneEuro2D(1.1, 0.03); this.cursor = this.filt.filter(tip!, tMs); }
+        if (pointing && !this.doneAt) { this.mode = 'arming'; this.since = tMs; this.anchor = { ...tip! }; this.filt = new OneEuro2D(0.8, 0.025); this.cursor = this.filt.filter(tip!, tMs); }
         break;
       case 'arming':
         if (!pointing) { if (!tip ? tMs - this.lastSeen > 250 : true) this.reset(); break; }

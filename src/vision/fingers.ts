@@ -49,7 +49,7 @@ function findPalm(pixels: number[], dist: Int32Array, far: number, dt: Float32Ar
   for (let d = far; d >= 0; d--) {
     const r = prof[d];
     if (at[d] < 0) continue;
-    if (far - d <= 4.5 * r && r >= 0.97 * bestR) { bestR = Math.max(bestR, r); best = at[d]; narrowFor = 0; } // ties: further back (a flat hand's palm is behind its fingers)
+    if (far - d <= 6 * r && r >= 0.97 * bestR) { bestR = Math.max(bestR, r); best = at[d]; narrowFor = 0; } // ties: further back (a flat hand's palm is behind its fingers)
     else if (best >= 0 && r < 0.85 * bestR) { if (++narrowFor > Math.max(2, 0.5 * bestR)) break; } // past the wrist
     else narrowFor = 0;
   }

@@ -13,7 +13,8 @@ export type Step =
   | { do: 'home'; who: string }
   | { do: 'say'; who: string; text: string }
   | { do: 'trick'; who: string; kind: 'jump' | 'spin' | 'shake' | 'grow' | 'rain' }
-  | { do: 'wait'; ms: number };
+  | { do: 'wait'; ms: number }
+  | { do: 'draw'; what: string; place?: Place; near?: string };
 export type Place = 'sky' | 'ground' | 'water' | 'left' | 'right' | 'center' | 'top' | 'bottom';
 export type Plan = { story: string; steps: Step[]; note?: string };
 
@@ -34,12 +35,16 @@ Steps run in order. Each step is one of:
   {"do":"say","who":ID,"text":"…"}                a very short line in a speech bubble (max 5 words)
   {"do":"trick","who":ID,"kind":"jump|spin|shake|grow|rain"}   (rain: only for clouds)
   {"do":"wait","ms":N}                            a pause (300–2000)
-Use only the IDs listed. "this", "it", "these" mean the selected drawings. Something that isn't on the wall can't take part: narrate around it kindly.
+  {"do":"draw","what":"cat","place":PLACE}        draw something NEW on the wall (an AI finger draws it, then it comes alive). "what" = one or two plain words (cat, hot air balloon). Optional "near":ID instead of place.
+After a draw, later steps can use "new" as the ID of what was just drawn.
+Use only the IDs listed (and "new" after a draw). "this", "it", "these" mean the selected drawings. Something that isn't on the wall can't take part: narrate around it kindly.
 Keep it to at most 12 steps. Land a plane by sending it to the ground first. Make it charming, like a picture book.`;
 
 /** Keep only steps that make sense for this wall. */
 export function validPlan(raw: unknown, items: SceneItem[]): Plan | null {
   const ids = new Set(items.map((i) => i.id));
+  const hasDraw = Array.isArray((raw as { steps?: unknown })?.steps) && ((raw as { steps: { do?: string }[] }).steps).some((s) => s?.do === 'draw');
+  if (hasDraw) ids.add('new');
   if (!raw || typeof raw !== 'object') return null;
   const r = raw as { story?: unknown; steps?: unknown };
   const steps: Step[] = [];
@@ -58,6 +63,9 @@ export function validPlan(raw: unknown, items: SceneItem[]): Plan | null {
       case 'say': if (who && typeof x.text === 'string' && x.text.trim()) steps.push({ do: 'say', who, text: x.text.trim().slice(0, 40) }); break;
       case 'trick': if (who && TRICKS.includes(x.kind as string)) steps.push({ do: 'trick', who, kind: x.kind as 'jump' }); break;
       case 'wait': steps.push({ do: 'wait', ms: Math.max(200, Math.min(3000, Number(x.ms) || 600)) }); break;
+      case 'draw':
+        if (typeof x.what === 'string' && x.what.trim()) steps.push({ do: 'draw', what: x.what.trim().toLowerCase().replace(/[^a-z ]/g, '').slice(0, 30), ...(typeof x.near === 'string' && ids.has(x.near) && x.near !== 'new' ? { near: x.near } : PLACES.includes(x.place as Place) ? { place: x.place as Place } : {}) });
+        break;
     }
   }
   const story = typeof r.story === 'string' ? r.story.trim().slice(0, 240) : '';
@@ -67,6 +75,8 @@ export function validPlan(raw: unknown, items: SceneItem[]): Plan | null {
 /** Without a model: a few plain phrases ("the dog jumps", "the bird flies to the flower"). */
 export function simplePlan(text: string, items: SceneItem[]): Plan {
   const t = text.toLowerCase();
+  const draw = /\bdraw\s+(?:me\s+)?(?:a|an|some|the)?\s*([a-z]+)/.exec(t) ?? /\b(?:make|add)\s+(?:me\s+)?(?:a|an|some)\s+([a-z]+)/.exec(t);
+  if (draw) return { story: `A ${draw[1]} appears on the wall.`, steps: [{ do: 'draw', what: draw[1] }], note: 'simple (no language model)' };
   const named = items.filter((i) => t.includes(i.label)).sort((a, b) => t.indexOf(a.label) - t.indexOf(b.label)); // the first one mentioned is the subject
   const actors = named.length ? named : items.filter((i) => i.selected);
   const steps: Step[] = [];
@@ -114,3 +124,38 @@ export async function planCommand(text: string, items: SceneItem[], apiKey: stri
     return { ...simplePlan(text, items), note: `${model} unreachable: ${err instanceof Error ? err.message : err}` };
   }
 }
+
+/**
+ * Something the app has no drawing for ("a giraffe"): the model sketches it as a few simple lines,
+ * like a quick doodle, in a 100 x 100 box. Null when there's no key or it can't.
+ */
+export async function sketch(what: string, apiKey: string | undefined, fetchFn: typeof fetch = fetch, model = COMMAND_MODEL): Promise<number[][][] | null> {
+  if (!apiKey) return null;
+  try {
+    const res = await fetchFn('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(25000),
+      body: JSON.stringify({
+        model,
+        max_tokens: 2500,
+        temperature: 0.4,
+        messages: [
+          { role: 'system', content: 'You draw simple, charming single-line doodles, like a minimalist picture book: clear outline, a few key features (eyes, ears, wheels…), side view facing right. Reply with JSON only: {"strokes": [[[x,y],[x,y],...], ...]} in a 100 x 100 box (y down), 2 to 10 strokes, 6 to 40 points each, smooth curves made of many points.' },
+          { role: 'user', content: `Draw: ${what}` },
+        ],
+      }),
+    });
+    if (!res.ok) return null;
+    const content: string = (await res.json())?.choices?.[0]?.message?.content ?? '';
+    const parsed = JSON.parse(content.slice(content.indexOf('{'), content.lastIndexOf('}') + 1));
+    const strokes = (Array.isArray(parsed?.strokes) ? parsed.strokes : [])
+      .map((st: unknown) => (Array.isArray(st) ? st : []).filter((p: unknown) => Array.isArray(p) && p.length >= 2 && Number.isFinite(+p[0]) && Number.isFinite(+p[1])).map((p: number[]) => [Math.max(0, Math.min(100, +p[0])), Math.max(0, Math.min(100, +p[1]))]))
+      .filter((st: number[][]) => st.length >= 2)
+      .slice(0, 12);
+    return strokes.length ? strokes : null;
+  } catch {
+    return null;
+  }
+}
+

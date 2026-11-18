@@ -100,7 +100,8 @@ export function analyzeScene(mask: Mask, blobs: Blob[], lit?: Mask, prevTip?: Pt
     for (const i of edge) if (group.get(i) === best) { sx += i % W; sy += (i / W) | 0; n1++; }
     if (n1) memory.entry = { x: sx / n1, y: sy / n1 };
   }
-  for (const i of edge) if (group.get(i) === best) { dist[i] = 0; queue[qt++] = i; }
+  const entryPx = new Set<number>();
+  for (const i of edge) if (group.get(i) === best) { dist[i] = 0; queue[qt++] = i; entryPx.add(i); }
   let far = 0;
   while (qh < qt) {
     const i = queue[qh++], x = i % W, d = dist[i] + 1;
@@ -191,9 +192,21 @@ export function analyzeScene(mask: Mask, blobs: Blob[], lit?: Mask, prevTip?: Pt
   let pose: Pose = finger.pointing ? 'point' : pieces >= 2 ? 'open' : handLen <= 1.35 * handW ? 'fist' : 'open';
   // Better: find the fingers by their shape (vision/fingers.ts). One long finger = point, and the
   // pen is that finger's own tip, wherever the arm comes from; several = open; none = fist (if compact).
-  const edgePx = (i: number) => { const x = i % W, y = (i / W) | 0; return off(x - 1, y) || off(x + 1, y) || off(x, y - 1) || off(x, y + 1); };
-  const handShape = findFingers(inBlob, W, H, Array.from(blob.pixels), edgePx, dist, far);
-  if (handShape) {
+  // only where the ARM comes in is "the arm" — a fingertip touching another edge of the picture
+  // (drawing near the bottom) is still a finger
+  const handShape = findFingers(inBlob, W, H, Array.from(blob.pixels), (i) => entryPx.has(i), dist, far);
+  // drawing: keep following the finger the pen is on, whatever else the hand is doing (a thumb out,
+  // other fingers showing) — it only waits if no finger is anywhere near where the tip just was
+  const tracked = prevTip && handShape
+    ? handShape.fingers.filter((f) => f.length >= 0.6 * handShape.palmR).sort((a, b) => Math.hypot(a.tip.x - prevTip.x, a.tip.y - prevTip.y) - Math.hypot(b.tip.x - prevTip.x, b.tip.y - prevTip.y))[0]
+    : undefined;
+
+  if (handShape && tracked && Math.hypot(tracked.tip.x - prevTip!.x, tracked.tip.y - prevTip!.y) <= 3 * handShape.palmR) {
+    pose = 'point';
+    finger.tip = litAt ? refineTip(tracked.tip, tracked.dir, litAt, tracked.width) : tracked.tip;
+    finger.tipDir = tracked.dir;
+    finger.pointing = true;
+  } else if (handShape) {
     const long = longFingers(handShape);
     if (long.length) {
       const f = pickFinger(handShape, prevTip ?? null)!;

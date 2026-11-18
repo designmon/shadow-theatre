@@ -39,7 +39,7 @@ export function refineStroke(raw: Pt[]): { points: Pt[]; closed: boolean } {
   const size = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys), 1);
   const a = raw[0], z = raw[raw.length - 1];
   const closed = raw.length > 6 && Math.hypot(a.x - z.x, a.y - z.y) < size * 0.2;
-  const eps = Math.max(3, size * 0.025);
+  const eps = Math.max(4, size * 0.032); // a little more: wobbles from a hand in the air smooth out
   let simple: Pt[];
   if (closed) {
     // a loop: split at the point farthest from the start, simplify both halves (start == end breaks RDP)
@@ -48,5 +48,5 @@ export function refineStroke(raw: Pt[]): { points: Pt[]; closed: boolean } {
     simple = [...simplify(raw.slice(0, m + 1), eps).slice(0, -1), ...simplify(raw.slice(m), eps)];
   } else simple = simplify(raw, eps);
   const pts = closed ? simple.slice(0, -1) : simple;
-  return { points: chaikin(pts, 3, closed), closed };
+  return { points: chaikin(pts, 4, closed), closed };
 }

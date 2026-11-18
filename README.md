@@ -113,6 +113,11 @@ button: it's listening, and shows what it hears. Say what should happen, e.g. *"
 the fish gets on, and they fly off"*. Then show a **stop sign** (open palm, held still; drop your
 hand once after waving first) or click **send**. The drawings act it out and the story panel
 (bottom left) tells it. There's no spoken reply. **M** on the keyboard starts and sends too.
+
+**Ask the AI to draw:** *"draw a cat"*, *"draw a hot air balloon over the house"*. An AI finger
+comes in from the side and draws it stroke by stroke, and then it comes alive like your own
+drawings. Things the app knows (cat, dog, boat, flower…) are drawn from its clean drawings;
+anything else is sketched by the model.
 It uses Chrome's speech recognition (allow the microphone once) and, with `OPENROUTER_API_KEY`,
 `anthropic/claude-haiku-5.5` on OpenRouter to turn your words into actions (`COMMAND_MODEL` picks
 another). Without the key only simple phrases work ("the dog jumps").

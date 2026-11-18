@@ -3,7 +3,7 @@ import { createServer } from 'node:http';
 import { saveCalibrationFrames, saveCapture, saveDoodle } from './captures';
 import { ClipWatcher, saveRunwayInput, serveClip, streamClipEvents, type RunwayExport } from './runway';
 import { RunwayGenerator } from './runwayApi';
-import { COMMAND_MODEL, planCommand, type SceneItem } from './command';
+import { COMMAND_MODEL, planCommand, sketch, type SceneItem } from './command';
 import { handleHealth, type HealthClient } from './health';
 import { jevHealth, MODEL, recognizeDoodleWithJev, recognizeWithJev } from './jev';
 import { CLIENT_OPTIONS, handleRecognize, UNKNOWN, type RecognizeClient } from './recognize';
@@ -60,6 +60,16 @@ createServer(async (req, res) => {
       res.writeHead(400).end(String(err instanceof Error ? err.message : err));
       return;
     }
+  }
+  // AI drawing: something the app has no drawing for, sketched by the model
+  if (req.method === 'POST' && req.url === '/api/sketch') {
+    const chunks: Buffer[] = [];
+    for await (const c of req) chunks.push(c as Buffer);
+    const { what } = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}') as { what?: string };
+    const started = Date.now();
+    const strokes = await sketch(String(what ?? '').slice(0, 40), OPENROUTER_KEY);
+    console.log(`[sketch] ${what}: ${strokes ? strokes.length + ' strokes' : 'none'} in ${Date.now() - started} ms`);
+    return json({ strokes });
   }
   // Runway, phase 1: exports in, clips out (server/runway.ts)
   if (req.method === 'POST' && req.url === '/api/runway/in') {
