@@ -458,7 +458,8 @@ export class Doodle implements Creature {
   private frame(): { user: Pt[][]; clean: Pt[][] } {
     const settle = Math.min(1, this.t / SETTLE_MS), se = settle * settle * (3 - 2 * settle);
     const bk = Math.min(1, Math.max(0, (this.t - this.beautifyAt) / BEAUTIFY_MS)), be = bk * bk * (3 - 2 * bk) * 0.6;
-    const still = this.phase === 'clip' || this.phase === 'afterClip' || this.frozen;
+    // at rest it is still: drawings move when they are made, when you tell them to, or in a little scene
+    const still = this.phase === 'clip' || this.phase === 'afterClip' || this.phase === 'parked' || this.frozen;
     const m = still ? null : this.motion, t = Math.max(0, this.t - this.aliveAt), s = this.size;
     const { c, scale: place, energy } = this.placement();
     const wake = (m ? Math.min(1, t / WAKE_MS) : 0) * energy;
@@ -478,7 +479,6 @@ export class Doodle implements Creature {
     if (m === 'beat') { const b = (t / (energy < 1 ? 1400 : 1000)) % 1; scale *= 1 + (Math.exp(-((b - 0.1) ** 2) / 0.002) * 0.12 + Math.exp(-((b - 0.3) ** 2) / 0.002) * 0.08) * Math.max(wake, 0.3); }
     if (m === 'twinkle') { scale *= 1 + Math.sin(t / 260) * 0.06 * Math.max(wake, 0.3); rot = Math.sin(t / 1300) * 0.08 * wake; }
     if (m === 'hop') { const ph = (t / 800) % 1, land = Math.max(0, 1 - Math.abs(ph - 0.98) * 12); sy = 1 - 0.12 * land * performing; sx = 1 + 0.08 * land * performing; }
-    if (this.phase === 'parked' && !this.frozen) scale *= 1 + Math.sin(this.t / 1200) * 0.015; // resting: a gentle breath
     // a trick
     if (this.trickKind && !this.frozen) {
       const k = Math.min(1, (this.t - this.trickAt) / TRICK_MS[this.trickKind]);

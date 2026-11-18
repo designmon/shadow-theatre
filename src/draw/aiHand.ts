@@ -1,9 +1,8 @@
 import type { Pt } from '../types';
 
 /**
- * The AI's finger: a drawn hand that comes in from the side of the wall, draws something stroke by
- * stroke — like you do with your finger — and goes away again. White with an ink outline, so the
- * camera never takes it for a shadow.
+ * The AI's pen: it comes in from the side of the wall, draws something stroke by stroke and goes
+ * away again. White with an ink outline, so the camera never takes it for a shadow.
  */
 const SPEED = 0.55; // px/ms while drawing
 const HOP = 1.1; // px/ms between strokes (finger lifted)
@@ -104,34 +103,30 @@ export class AiArtist {
       }
       ctx.stroke();
     }
-    // the finger: a hand pointing down-left at the tip, white with an ink outline
+    // the pen: slim, tilted, its nib on the line; white with an ink outline (never a "shadow")
     const { x, y } = this.tip;
     ctx.translate(x, y);
-    ctx.rotate(-0.6);
+    const wobble = this.phase === 'draw' && !this.hopFrom ? Math.sin(this.t / 90) * 0.03 : 0;
+    ctx.rotate(0.62 + wobble); // leaning to the right, like a pen in a hand
+    if (this.hopFrom) ctx.translate(0, -10); // lifted between strokes
+    const g = ctx.createRadialGradient(0, 0, 1, 0, 0, 22);
+    g.addColorStop(0, `rgba(${accent},0.4)`); g.addColorStop(1, `rgba(${accent},0)`);
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, 22, 0, Math.PI * 2); ctx.fill();
+    ctx.lineWidth = 2.2;
+    ctx.lineJoin = 'round';
+    // nib
+    ctx.fillStyle = ink;
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(-6, -20); ctx.lineTo(6, -20); ctx.closePath(); ctx.fill(); ctx.stroke();
+    // grip
     ctx.fillStyle = '#fff';
-    ctx.lineWidth = 2.5;
-    const g = ctx.createRadialGradient(0, 0, 2, 0, 0, 26);
-    g.addColorStop(0, `rgba(${accent},0.45)`); g.addColorStop(1, `rgba(${accent},0)`);
-    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, 26, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = '#fff';
-    ctx.beginPath();
-    // index finger, then the hand
-    ctx.moveTo(-9, 4);
-    ctx.quadraticCurveTo(0, -10, 9, 4);
-    ctx.lineTo(9, 78);
-    ctx.quadraticCurveTo(34, 70, 46, 86); // knuckles of the curled fingers
-    ctx.quadraticCurveTo(58, 104, 50, 128);
-    ctx.quadraticCurveTo(40, 160, 6, 162); // palm
-    ctx.lineTo(-22, 162);
-    ctx.quadraticCurveTo(-34, 130, -24, 108);
-    ctx.quadraticCurveTo(-46, 98, -40, 84); // thumb
-    ctx.quadraticCurveTo(-30, 76, -9, 92);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-    ctx.lineWidth = 1.6;
-    ctx.beginPath(); ctx.moveTo(10, 96); ctx.quadraticCurveTo(26, 92, 38, 104); ctx.stroke(); // a crease
-    ctx.beginPath(); ctx.moveTo(10, 116); ctx.quadraticCurveTo(24, 112, 34, 124); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-6, -20); ctx.lineTo(-9, -44); ctx.lineTo(9, -44); ctx.lineTo(6, -20); ctx.closePath(); ctx.fill(); ctx.stroke();
+    // barrel
+    ctx.beginPath(); ctx.roundRect(-9, -168, 18, 124, [9, 9, 0, 0]); ctx.fill(); ctx.stroke();
+    // a band in the accent colour, and a clip
+    ctx.fillStyle = `rgb(${accent})`;
+    ctx.fillRect(-9, -58, 18, 9); ctx.strokeRect(-9, -58, 18, 9);
+    ctx.lineWidth = 1.8;
+    ctx.beginPath(); ctx.moveTo(4, -160); ctx.lineTo(4, -112); ctx.stroke();
     ctx.restore();
   }
 }

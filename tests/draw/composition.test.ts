@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { compositionArea, layout, zoneOf } from '../../src/draw/composition';
-import { WallButton, pauseIcon } from '../../src/ui/wallButton';
 import { Clicker } from '../../src/ui/clicker';
 
 const area = compositionArea({ w: 1920, h: 1080 });
@@ -38,30 +37,6 @@ describe('composition', () => {
     const { places } = layout(Array.from({ length: 8 }, () => item('star')), area);
     expect(places.filter((p) => p === null).length).toBe(2);
     expect(places[0]).toBeNull();
-  });
-});
-
-describe('the stop button: a quick fist over it', () => {
-  const wall = { w: 1920, h: 1080 };
-  const b = new WallButton(['pause', 'play'], pauseIcon);
-  const at = b.centre(wall);
-  it('fist then open over it toggles; just hovering or a fist elsewhere does not', () => {
-    expect(b.feed(at, false, wall, 0)).toBe(false);
-    expect(b.hovered).toBe(true);
-    expect(b.feed({ x: 200, y: 600 }, true, wall, 100)).toBe(false); // a fist somewhere else
-    expect(b.feed({ x: 200, y: 600 }, false, wall, 300)).toBe(false);
-    expect(b.feed(at, true, wall, 400)).toBe(false);
-    expect(b.feed(at, true, wall, 600)).toBe(false);
-    expect(b.feed(at, false, wall, 800)).toBe(true); // released: click
-    expect(b.on).toBe(true);
-    expect(b.feed(at, true, wall, 900)).toBe(false); // a flicker right after: ignored until the hand leaves
-    expect(b.feed(at, false, wall, 1000)).toBe(false);
-    expect(b.on).toBe(true);
-    expect(b.feed({ x: 200, y: 600 }, false, wall, 1100)).toBe(false); // the hand leaves: ready again
-    expect(b.feed(at, true, wall, 1000)).toBe(false);
-    expect(b.feed(at, true, wall, 4000)).toBe(false); // held far too long: not a click
-    expect(b.feed(at, false, wall, 4100)).toBe(false);
-    expect(b.on).toBe(true);
   });
 });
 

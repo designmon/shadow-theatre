@@ -1,7 +1,7 @@
 import type { Box, Pt } from '../types';
 
 /**
- * Left of the pause button: a small microphone ("wave to talk"); while listening, a hand-drawn
+ * In the top-right corner: a small microphone ("wave to talk"); while listening, a hand-drawn
  * sound wave that moves with your voice, what it has heard so far, and a send button (a quick fist
  * on it, or a stop sign with your hand). Ink blue, like everything on the wall.
  */
@@ -13,8 +13,8 @@ let smooth = 0;
 export class ListeningUI {
   private sendBox: Box | null = null;
 
-  /** Where it sits: left of the pause button. */
-  centre(wall: { w: number; h: number }): Pt { return { x: wall.w - 290, y: 110 }; }
+  /** Where it sits: the top-right corner of the wall. */
+  centre(wall: { w: number; h: number }): Pt { return { x: wall.w - 170, y: 100 }; }
 
   hitSend(p: Pt): boolean {
     const b = this.sendBox;

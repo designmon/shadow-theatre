@@ -6,7 +6,7 @@ import { grabFrame, listCameras, saveCameraId, savedCameraId, startCamera } from
 import { litFrame } from './vision/light';
 import { bilinear } from './vision/fingers';
 import { compositionArea, drawDecor, layout, type Decor } from './draw/composition';
-import { pauseIcon, WallButton } from './ui/wallButton';
+import { TipGuard } from './draw/tipGuard';
 import { Clicker } from './ui/clicker';
 import { Director, StoryLog } from './story/director';
 import { ScriptRunner, type Plan } from './story/script';
@@ -85,7 +85,7 @@ function compose(): void {
 }
 
 // the stop button on the wall: make a fist over it and open your hand (or press P)
-const pauseButton = new WallButton(['pause', 'play'], pauseIcon);
+const tipGuard = new TipGuard(); // keeps the pen on the real fingertip (no sliding back along the finger)
 const clicker = new Clicker();
 // little stories between the drawings, and what a drawing does when you click it
 const director = new Director(() => creatures.filter((c): c is Doodle => c instanceof Doodle && !c.retiring), () => performance.now());
@@ -117,7 +117,6 @@ runner.onDraw = async (what, at) => {
   if (!strokes?.length) { story.add(`(I don't know how to draw a ${what} yet)`, performance.now()); return null; }
   return new Promise((resolve) => artist.start(strokes!, { w, h }, (drawn) => {
     const d = new Doodle(drawn, { w, h });
-    d.frozen = pauseButton.on;
     creatures.push(d);
     d.comeAlive(motionFor(label, 'float'), label, !!icon);
     compose();
@@ -151,11 +150,6 @@ async function submitVoice(): Promise<void> {
   }
 } // where the hand is on the wall (fingertip, or palm for a fist)
 let fistFrames = 0;
-function setPaused(on: boolean): void {
-  if (pauseButton.on !== on) pauseButton.click(performance.now());
-  for (const c of creatures) if (c instanceof Doodle) c.frozen = on;
-  say(on ? 'paused — the drawings rest' : 'playing');
-}
 
 /** How lit a camera point is (0 shadow .. 1 white wall), between pixels — for a precise fingertip. */
 function litSampler(frame: Gray, lit: Mask | null): (x: number, y: number) => number {
@@ -172,7 +166,6 @@ function litSampler(frame: Gray, lit: Mask | null): (x: number, y: number) => nu
 function bringDrawingToLife(strokes: { x: number; y: number }[][]): void {
   const { w, h } = stage.size();
   const doodle = new Doodle(strokes, { w, h });
-  doodle.frozen = pauseButton.on;
   creatures.push(doodle);
   doodleToPng(strokes)
     .then((png) => fetch('/api/doodle', { method: 'POST', body: png, headers: { 'content-type': 'image/png' } }))
@@ -413,7 +406,6 @@ async function main() {
       // the whole wall for Runway: every drawing where it is now (captures/runway-in/scene-…)
       void exportScene(doodles(), stage.size(), { w: stage.canvas.width, h: stage.canvas.height }).then((name) => say(name ? `saved for Runway: ${name}` : 'could not save — is the server running?'));
     }
-    if (k === 'p') setPaused(!pauseButton.on);
     if (k === 'm') { if (voice.listening) void submitVoice(); else startListening(); } // the keyboard way to talk
     if (k === 'v') { if (latestScene) playScene(latestScene); else say('no scene clip yet — drop one into captures/runway-out/'); }
     if (k === 'c') calibrate();
@@ -473,7 +465,7 @@ async function main() {
       // pointing at a resting drawing (pen not in use): hover, then wake it — and don't start the pen
       // (any hand but a fist: the fingertip lands on the drawing's own ink, where its shadow can't be seen)
       const found = tipProj && scene && scene.pose !== 'fist' && (penState.mode === 'idle' || penState.mode === 'arming')
-        ? creatures.find((c): c is Doodle => c instanceof Doodle && c.parked && c.hit(tipProj!)) : undefined;
+        ? creatures.find((c): c is Doodle => c instanceof Doodle && c.parked && c.hasClip && c.hit(tipProj!)) : undefined;
       const resting = found ?? (hovered && now - hovered.seen < 300 ? hovered.d : undefined); // ride out a dropped frame
       if (resting) {
         if ((window as any).__trace) console.log('[trace] hover', Math.round(now));
@@ -492,13 +484,11 @@ async function main() {
       // a fist is where its palm is (it has no fingertip); otherwise the fingertip
       const handAt = scene && calib ? (scene.pose === 'fist' && scene.palm ? applyH(calib.camToProj, scene.palm) : tipProj) : null;
       handAtWall = handAt;
-      pauseButton.feed(handAt, false, stage.size(), now); // hover look only; clicks come from the clicker
       const click = penFree ? clicker.feed(handAt, fistFrames >= 2, now) : null;
       if (click) {
         // a click (quick fist): the pause button, an answer in a bubble, or a drawing
         const wall = stage.size(), ds = doodles();
-        if (pauseButton.hit(click, wall)) { setPaused(!pauseButton.on); sparkles.burst(pauseButton.centre(wall), 10, 60); }
-        else if (voice.listening && listeningUI.hitSend(click)) void submitVoice();
+        if (voice.listening && listeningUI.hitSend(click)) void submitVoice();
         else {
           // a drawing: select it (or let it go) — "this", "it" in what you say next
           const d = ds.filter((x) => !x.retiring && x.what && x.hit(click)).sort((a, b) => Math.hypot(a.where.x - click.x, a.where.y - click.y) - Math.hypot(b.where.x - click.x, b.where.y - click.y))[0];
@@ -509,14 +499,21 @@ async function main() {
       const openHand = scene?.pose === 'open';
       if (penFree && !voice.listening && !thinking && waveDetector.feed(handAt, openHand, now)) startListening();
       if (voice.listening && stopSign.feed(handAt, openHand, now)) void submitVoice();
-      const atButton = penFree && (pauseButton.hovered || voice.listening || (!!handAt && listeningUI.near(handAt, stage.size())));
-      penState = pen.update(tipProj && scene && !resting && !atButton ? { tip: tipProj, pose: scene.pose, dir: dirProj } : null, now);
+      const atButton = penFree && (voice.listening || (!!handAt && listeningUI.near(handAt, stage.size())));
+      // the fingertip, checked against the palm: no sliding back along the finger, no hops
+      let penTip = tipProj, penPose = scene?.pose ?? 'open';
+      if (tipProj && scene && penPose === 'point') {
+        const palmProj = scene.palm ? applyH(calib.camToProj, scene.palm) : null;
+        const guarded = tipGuard.feed(tipProj, palmProj, now);
+        if (guarded) penTip = guarded; else penPose = 'open'; // not trusted this frame: the pen waits
+      } else if (!scene) tipGuard.reset();
+      penState = pen.update(penTip && scene && !resting && !atButton ? { tip: penTip, pose: penPose, dir: dirProj } : null, now);
       const finished = pen.takeFinished();
       if (finished) bringDrawingToLife(finished);
       for (const b of pen.takeBursts()) sparkles.burst(b.at, b.kind === 'finish' ? 16 : 10, b.kind === 'finish' ? 140 : 70);
       if (penState.mode === 'down' && penState.cursor) sparkles.trail(penState.cursor, dt); else sparkles.lift();
       if (scene?.pointing) lastPointingAt = now;
-      if ((window as any).__trace) { (window as any).__mask = mask; (window as any).__lit = lit; (window as any).__handSeen = !!scene; (window as any).__doodles = doodles; (window as any).__wallClip = () => wallClip; (window as any).__paused = () => pauseButton.on; (window as any).__caption = () => director.caption; (window as any).__story = () => story.last; (window as any).__voice = () => ({ listening: voice.listening, thinking }); (window as any).__runner = runner; (window as any).__playPlan = (p: Plan) => { story.add(p.story, performance.now()); runner.play(p, doodles()); }; (window as any).__btn = () => ({ tip: scene?.pose === 'fist' && scene.palm && calib ? applyH(calib.camToProj, scene.palm) : rawTip, hov: pauseButton.hovered, c: pauseButton.centre(stage.size()), pose: scene?.pose, fistFrames }); }
+      if ((window as any).__trace) { (window as any).__mask = mask; (window as any).__lit = lit; (window as any).__handSeen = !!scene; (window as any).__doodles = doodles; (window as any).__wallClip = () => wallClip; (window as any).__caption = () => director.caption; (window as any).__story = () => story.last; (window as any).__voice = () => ({ listening: voice.listening, thinking }); (window as any).__runner = runner; (window as any).__playPlan = (p: Plan) => { story.add(p.story, performance.now()); runner.play(p, doodles()); }; }
       if ((window as any).__trace) console.log('[trace]', Math.round(now), scene ? `pointing=${scene.pointing} tip=${Math.round(scene.tip.x)},${Math.round(scene.tip.y)} box=${JSON.stringify(scene.puppetBox)} usable=${!!usable}` : 'no scene', penState.mode, scene?.pose ?? '');
       const penNearby = penState.mode !== 'idle' || now - lastPointingAt < POINTING_QUIET_MS;
       if (penNearby) hold.reset(); // a pointing finger is a pen, not a puppet
@@ -546,7 +543,7 @@ async function main() {
     const alive = creatures.filter((c) => !c.retiring);
     for (let i = 0; i < alive.length - MAX_CREATURES; i++) alive[i].retire();
     for (const c of creatures) c.update(dt);
-    director.update(pauseButton.on || runner.busy);
+    director.update(runner.busy || artist.busy || penState.mode !== 'idle');
     runner.update();
     artist.update(dt);
     if (director.caption && director.caption.at !== lastCaptionAt) { lastCaptionAt = director.caption.at; story.add(director.caption.text, director.caption.at); }
@@ -575,9 +572,8 @@ async function main() {
       if (p.ended || since > 60000) wallClip = null;
     }
     for (const d of doodles()) d.veil = veil;
-    if (decor) drawDecor(stage.ctx, decor, INK_COLOR, pauseButton.on ? 0 : now, veil);
+    if (decor) drawDecor(stage.ctx, decor, INK_COLOR, 0, veil); // still: things move when you ask them to
     for (const c of creatures) c.draw(stage.ctx);
-    pauseButton.draw(stage.ctx, stage.size(), INK_COLOR, accentAt, now);
     { const placed: { x: number; y: number; w: number; h: number }[] = []; for (const d of doodles()) { const b = d.drawSpeech(stage.ctx, stage.size(), handAtWall, placed); if (b) placed.push(b); } }
     // selected drawings: a soft ring (what "this" means in a voice command)
     for (const d of doodles()) if (d.selected && !d.retiring) {

@@ -101,20 +101,20 @@ draw:
 The scene adds its own quiet details: grass by the plants, waves, and two far-off birds following
 a bird. Point at a drawing in the composition for half a second to wake it.
 
-**Stories.** Every so often the drawings play a little scene together, with a short caption under
+**Stories.** At rest the drawings stay still. Now and then (about every half minute) they play a little scene together, with a short caption under
 it: the bird visits the flower, the dog wants to play and the cat isn't impressed, a cloud rains
 on the flower and it grows, the sun wakes everyone up.
 
 **Select a drawing** with a click (a quick fist over it, then open your hand). A dashed ring
 shows it's selected; in what you say next, "this" or "it" means the selected drawing.
 
-**Voice commands.** **Wave** your open hand and a sketched sound wave appears left of the pause
-button: it's listening, and shows what it hears. Say what should happen, e.g. *"the plane lands,
+**Voice commands.** **Wave** your open hand and a sketched sound wave appears in the top-right
+corner: it's listening, and shows what it hears. Say what should happen, e.g. *"the plane lands,
 the fish gets on, and they fly off"*. Then show a **stop sign** (open palm, held still; drop your
 hand once after waving first) or click **send**. The drawings act it out and the story panel
 (bottom left) tells it. There's no spoken reply. **M** on the keyboard starts and sends too.
 
-**Ask the AI to draw:** *"draw a cat"*, *"draw a hot air balloon over the house"*. An AI finger
+**Ask the AI to draw:** *"draw a cat"*, *"draw a hot air balloon over the house"*. An AI pen
 comes in from the side and draws it stroke by stroke, and then it comes alive like your own
 drawings. Things the app knows (cat, dog, boat, flower…) are drawn from its clean drawings;
 anything else is sketched by the model.
@@ -122,13 +122,12 @@ It uses Chrome's speech recognition (allow the microphone once) and, with `OPENR
 `anthropic/claude-haiku-5.5` on OpenRouter to turn your words into actions (`COMMAND_MODEL` picks
 another). Without the key only simple phrases work ("the dog jumps").
 
-**The pause button** (top right of the wall): make a **fist over it and open your hand**, a
-quick click. Everything stops moving; click again to play. The **P** key does the same.
-
 **How the pen finds your fingertip:** it finds your palm (the widest part of the hand's shadow)
 and your fingers (what sticks out of it), and draws with the tip of the longest finger. It stays
 on that finger while you draw, so a thumb or knuckle can't steal the pen, whichever way your arm
-comes in. One finger out = draw, several = pen lifted, none = fist.
+comes in. A guard checks the tip against your palm: if the finger's faint tip reads shorter for
+a moment the pen holds its place (no sliding back along the finger), and a sudden hop to another
+part of the hand isn't believed until it holds steady.
 
 The ink is a vivid blue, not black: to the camera black ink looks exactly like a shadow, while
 blue ink still sends the projector's full blue light and reads as lit wall. The accent (blue →

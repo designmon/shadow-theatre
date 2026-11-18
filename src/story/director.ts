@@ -42,7 +42,7 @@ export class Director {
     const now = this.now();
     for (const q of this.queue.splice(0)) (q.at <= now ? q.fn() : this.queue.push(q));
     if (paused || now < this.nextAt) return;
-    this.nextAt = now + 10000 + Math.random() * 6000;
+    this.nextAt = now + 26000 + Math.random() * 16000; // now and then, not all the time
     const beats = this.beats();
     if (!beats.length) return;
     const total = beats.reduce((a, b) => a + b.weight, 0);

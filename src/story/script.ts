@@ -15,7 +15,6 @@ export type Step =
 export type Plan = { story: string; steps: Step[]; note?: string };
 
 const TRICK_MS = { jump: 750, spin: 900, shake: 700, grow: 900, rain: 2600 };
-const SETTLE_BACK_MS = 12000; // after the scene, everyone not off on a trip goes back to their place
 
 /** Plays a plan, one step after another. Call update() every frame. */
 export class ScriptRunner {
@@ -46,12 +45,10 @@ export class ScriptRunner {
       const s = this.steps.shift()!;
       this.nextAt = now + this.run(s);
     }
-    if (!this.waiting && !this.steps.length && this.actors.size && this.endAt === null) this.endAt = now + SETTLE_BACK_MS;
-    if (this.endAt !== null && now >= this.endAt) {
-      for (const d of this.actors) if (d.directed && !d.riding) d.goHome();
-      this.actors.clear();
-      this.endAt = null;
-    }
+    // when the scene is over, everyone stays where the story left them (those who left the wall
+    // come back by themselves); a short quiet moment before the drawings' own little scenes resume
+    if (!this.waiting && !this.steps.length && this.actors.size && this.endAt === null) { this.endAt = now + 4000; this.actors.clear(); }
+    if (this.endAt !== null && now >= this.endAt) this.endAt = null;
   }
 
   /** Where to draw something new for a place word. */
