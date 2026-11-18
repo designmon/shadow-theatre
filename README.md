@@ -125,6 +125,35 @@ Decider (free) over every saved drawing. For an accuracy score, add lines like
 `2026-11-17T20-01-02-123Z-heart.png<TAB>heart` to `captures/doodles/truth.txt`. To pick
 models: `npm run bakeoff -- typesafe/jev-1.14 google/gemini-decision-1`.
 
+## Runway: let Runway animate the drawings
+
+**Phase 1 (by hand, with Runway Pro in the web app).**
+
+1. Draw. Each recognised drawing is also saved for Runway:
+   - `captures/runway-in/<id>.png` (1280×720, the drawing alone, centred, bold black on white)
+   - `<id>.txt` (the prompt to paste)
+   - `<id>.json` (used to put the clip back in place)
+
+   The id looks like `20261118-143205-butterfly`.
+2. Press **E** to save the whole wall: `captures/runway-in/scene-<time>.png` (every drawing where
+   it is now, at projector resolution), with its prompt in `scene-<time>.txt`.
+3. In the Runway web app, use image to video: upload the `.png`, paste the `.txt`, use 16:9, and
+   generate.
+4. Download the clip into `captures/runway-out/`, named after the image (`<id>.mp4`,
+   `scene-<time>.mp4`). A name that contains the id also works.
+5. The page notices it within a second ("Runway clip ready — point at the butterfly").
+   - **Point at that drawing** in the bottom row. It rises, plays the Runway clip in its place,
+     and fades back to the still drawing.
+   - **A scene clip** plays across the whole wall as soon as it arrives. **V** plays it again.
+
+Clips are recoloured to the blue ink before they reach the wall, so the camera never mistakes
+them for shadows. White becomes see-through, so other drawings show through.
+
+Clips match drawings made since the page was opened. A reload starts a fresh wall.
+
+Phase 2 (automatic, via the Runway API with `RUNWAYML_API_SECRET`) is planned in
+`docs/superpowers/specs/2026-11-18-runway-design.md`.
+
 ## Try it without a projector
 
 `http://localhost:5173/?sim=dog` (or `rabbit`, `butterfly`, `swan`, `point` for drawing; add `&wake`

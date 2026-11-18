@@ -4,6 +4,8 @@ import { wallMask, warpMask } from './calibration/homography';
 import { debounce, MisalignmentWatch } from './calibration/watch';
 import { grabFrame, listCameras, saveCameraId, savedCameraId, startCamera } from './camera';
 import { litFrame } from './vision/light';
+import { exportDrawing, exportScene } from './runway/export';
+import { ClipPlayer, watchClips, type ClipEvent } from './runway/clips';
 import { Checklist, describeHealth, type Health } from './setup/checklist';
 import { SetupPanel } from './setup/panel';
 import { PeelOff } from './creatures/peel';
@@ -23,7 +25,7 @@ import { recognize } from './recognize/client';
 import { maskToPng, snapshotRegion } from './vision/snapshot';
 import { LaserPen, type PenState } from './draw/pen';
 import { Doodle, motionFor, type Motion } from './draw/doodle';
-import { accentAt, doodleToPng, drawPen } from './draw/render';
+import { accentAt, doodleToPng, drawPen, INK_COLOR } from './draw/render';
 import { Sparkles } from './draw/sparkles';
 import { applyH } from './calibration/homography';
 
@@ -77,8 +79,38 @@ function bringDrawingToLife(strokes: { x: number; y: number }[][]): void {
       const motion = motionFor(rec.what, rec.motion);
       lastRec = `drawing: ${rec.what} → ${motion}${rec.note ? ' — ' + rec.note : ''}`;
       doodle.comeAlive(motion, rec.what); // your own line, refined, with the motion that fits it
+      // also save it for Runway (captures/runway-in/<id>.png + prompt), once the clean drawing is in
+      setTimeout(() => void exportDrawing(doodle).then((id) => { if (id) matchClips(doodle); }), 1600);
     });
 }
+
+// ---- Runway, phase 1: clips dropped into captures/runway-out/ come back onto the wall ----
+const clipEvents: ClipEvent[] = [];
+let latestScene: ClipEvent | null = null;
+let wallClip: { player: ClipPlayer; at: number } | null = null; // a scene clip playing over the whole wall
+let note: { text: string; at: number } | null = null; // a short line on the wall
+const say = (text: string) => { note = { text, at: performance.now() }; };
+const doodles = () => creatures.filter((c): c is Doodle => c instanceof Doodle);
+function matchClips(d: Doodle): void {
+  const e = [...clipEvents].reverse().find((x) => d.id && x.file.includes(d.id));
+  if (e && !d.hasClip) { d.attachClip(new ClipPlayer(e.url)); say(`Runway clip ready — point at the ${d.what || 'drawing'}`); }
+}
+watchClips((e) => {
+  clipEvents.push(e);
+  if (e.file.startsWith('scene-')) {
+    latestScene = e;
+    if (!e.initial) playScene(e); // a new scene clip: play it once across the wall (V plays it again)
+    return;
+  }
+  const d = doodles().find((x) => x.id && e.file.includes(x.id));
+  if (d) { d.attachClip(new ClipPlayer(e.url)); say(`Runway clip ready — point at the ${d.what || 'drawing'}`); }
+});
+function playScene(e: ClipEvent): void {
+  const player = new ClipPlayer(e.url);
+  player.start();
+  wallClip = { player, at: performance.now() };
+}
+const SCENE_FADE_MS = 700;
 const STEADY_MS = 300; // only check creatures that have been fully opaque this long (camera/projector lag)
 let darkPx = 0;
 let whyIgnored: string | null = null;
@@ -265,6 +297,11 @@ async function main() {
     if (k === 'f') document.documentElement.requestFullscreen?.();
     if (k === 'd') { debug = !debug; document.getElementById('lastcap')!.style.display = debug && lastCapUrl ? 'block' : 'none'; }
     if (k === 'r') recorder.toggle(stream);
+    if (k === 'e') {
+      // the whole wall for Runway: every drawing where it is now (captures/runway-in/scene-…)
+      void exportScene(doodles(), stage.size(), { w: stage.canvas.width, h: stage.canvas.height }).then((name) => say(name ? `saved for Runway: ${name}` : 'could not save — is the server running?'));
+    }
+    if (k === 'v') { if (latestScene) playScene(latestScene); else say('no scene clip yet — drop one into captures/runway-out/'); }
     if (k === 'c') calibrate();
     if (k === 's') panel!.show(!panel!.visible);
   });
@@ -340,7 +377,7 @@ async function main() {
       for (const b of pen.takeBursts()) sparkles.burst(b.at, b.kind === 'finish' ? 16 : 10, b.kind === 'finish' ? 140 : 70);
       if (penState.mode === 'down' && penState.cursor) sparkles.trail(penState.cursor, dt); else sparkles.lift();
       if (scene?.pointing) lastPointingAt = now;
-      if ((window as any).__trace) { (window as any).__mask = mask; (window as any).__lit = lit; }
+      if ((window as any).__trace) { (window as any).__mask = mask; (window as any).__lit = lit; (window as any).__handSeen = !!scene; (window as any).__doodles = doodles; (window as any).__wallClip = () => wallClip; }
       if ((window as any).__trace) console.log('[trace]', Math.round(now), scene ? `pointing=${scene.pointing} tip=${Math.round(scene.tip.x)},${Math.round(scene.tip.y)} box=${JSON.stringify(scene.puppetBox)} usable=${!!usable}` : 'no scene', penState.mode, scene?.pose ?? '');
       const penNearby = penState.mode !== 'idle' || now - lastPointingAt < POINTING_QUIET_MS;
       if (penNearby) hold.reset(); // a pointing finger is a pen, not a puppet
@@ -381,7 +418,28 @@ async function main() {
     }
 
     clearWhite(stage);
+    // a scene clip over the whole wall: the drawings fade out under it and come back at the end
+    let veil = 1;
+    if (wallClip) {
+      const p = wallClip.player, since = now - wallClip.at, left = p.remainingMs;
+      const into = Math.min(1, since / SCENE_FADE_MS), out = Number.isFinite(left) ? Math.min(1, left / SCENE_FADE_MS) : 1;
+      const on = Math.min(into, out);
+      veil = 1 - on;
+      const { w, h } = stage.size();
+      p.draw(stage.ctx, { x: 0, y: 0, w, h }, on);
+      if (p.ended || since > 60000) wallClip = null;
+    }
+    for (const d of doodles()) d.veil = veil;
     for (const c of creatures) c.draw(stage.ctx);
+    if (note) {
+      const a = Math.min(1, (now - note.at) / 250) * Math.min(1, (3200 - (now - note.at)) / 500);
+      if (a <= 0) note = null;
+      else {
+        const c = stage.ctx, { h } = stage.size();
+        c.save(); c.globalAlpha = a; c.fillStyle = INK_COLOR; c.font = '300 18px "SF Pro Display", "Helvetica Neue", system-ui, sans-serif';
+        c.fillText(note.text, 24, h - 52); c.restore();
+      }
+    }
     drawPen(stage.ctx, penState);
     if (debug && rawTip) {
       // where the camera sees your fingertip right now: on your finger = mapping is right; the pen

@@ -24,6 +24,8 @@ export function motionFor(what: string, guess: Motion): Motion {
 
 const SETTLE_MS = 700; // the raw line melts into the refined one
 const BEAUTIFY_MS = 700; // a heart / star / circle eases toward its ideal shape
+const CLIP_FADE_MS = 700; // a Runway clip crossfades back to the still drawing
+const AFTER_CLIP_MS = 1500; // the still drawing holds a moment, then goes back to its place
 const REDRAW_MS = 1300; // the clean drawing of what it is draws itself over your lines
 const WAKE_MS = 900; // motion eases in
 const PERFORM_MS = 4000; // a little performance, then it goes to rest in its place
@@ -88,8 +90,28 @@ function fitIdeal(kind: string, base: Pt[]): Pt[] | null {
  * where it was drawn, then walks to its place in the row along the bottom and rests there.
  * Pointing at it wakes it to perform again.
  */
+/** A Runway clip of this drawing (src/runway/clips.ts), drawn in its place. */
+export interface DoodleClip {
+  start(): void;
+  readonly ended: boolean;
+  /** ms left (Infinity while unknown). */
+  readonly remainingMs: number;
+  draw(ctx: CanvasRenderingContext2D, rect: Box, alpha: number): void;
+}
+/** How the drawing sits in its Runway image: image px = 640 + (local - c) * s (1280 x 720). */
+export type RunwayFit = { s: number; cx: number; cy: number; w: number; h: number };
+export type Shape = { pts: Pt[]; closed: boolean; fill: boolean };
+
 export class Doodle implements Creature {
   kind = 'unknown' as const;
+  /** For Runway files: <yyyymmdd-hhmmss>-<label>, set once it is recognised. */
+  id = '';
+  /** How it sits in its Runway export (set when exported). */
+  runwayFit: RunwayFit | null = null;
+  /** 0..1: hidden while a scene clip plays over the whole wall. */
+  veil = 1;
+  private clip: DoodleClip | null = null;
+  private clipStarted = false;
   private strokes: Stroke[];
   private home: Pt;
   private size: number;
@@ -98,7 +120,8 @@ export class Doodle implements Creature {
   private t = 0;
   private aliveAt = Infinity;
   private beautifyAt = Infinity;
-  private phase: 'drawn' | 'performing' | 'toPark' | 'parked' | 'toStage' = 'drawn';
+  private phase: 'drawn' | 'performing' | 'toPark' | 'parked' | 'toStage' | 'clip' | 'afterClip' = 'drawn';
+  private readonly bornAt = new Date();
   private phaseAt = 0;
   private slot: Pt | null = null;
   private slotScale = 0.4;
@@ -149,6 +172,8 @@ export class Doodle implements Creature {
   comeAlive(motion: Motion, label = ''): void {
     this.motion = motion;
     this.label = label;
+    const d = this.bornAt, p2 = (v: number) => String(v).padStart(2, '0');
+    this.id = `${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}-${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}-${(label || 'doodle').replace(/[^a-z0-9]/g, '') || 'doodle'}`;
     this.aliveAt = Math.max(this.t, SETTLE_MS);
     this.beautifyAt = this.aliveAt;
     // a clean drawing of what it is, fitted over your lines; otherwise gently refine simple shapes
@@ -165,6 +190,32 @@ export class Doodle implements Creature {
   park(slot: Pt, scale: number): void {
     this.slot = { ...slot };
     this.slotScale = scale;
+  }
+
+  get what(): string { return this.label; }
+  get how(): Motion | null { return this.motion; }
+  get playingClip(): boolean { return this.phase === 'clip'; }
+
+  /** Its Runway clip: plays the next time it wakes, instead of the built-in animation. */
+  attachClip(clip: DoodleClip): void {
+    this.clip = clip;
+  }
+  get hasClip(): boolean { return !!this.clip; }
+
+  /** The shape it rests as (local coords): the clean drawing if there is one, else your refined line. */
+  restShape(): Shape[] {
+    if (this.clean) return this.clean.map((st) => ({ pts: st.pts, closed: !!st.closed, fill: !!st.fill }));
+    const single = this.strokes.length === 1 && this.strokes[0].closed;
+    return this.strokes.map((st) => ({ pts: st.base.map((b, i) => (st.ideal ? { x: b.x + (st.ideal[i].x - b.x) * 0.6, y: b.y + (st.ideal[i].y - b.y) * 0.6 } : b)), closed: st.closed, fill: single }));
+  }
+
+  /** What's on the wall right now (stage px), with its line weight. */
+  shapeNow(): { shapes: Shape[]; lineWidth: number } {
+    const f = this.frame(), k = this.redrawK(), { scale } = this.placement();
+    const lineWidth = Math.max(3.5, INK_W * Math.sqrt(scale));
+    if (this.clean && k >= 1) return { shapes: f.clean.map((pts, i) => ({ pts, closed: !!this.clean![i].closed, fill: !!this.clean![i].fill })), lineWidth };
+    const single = this.strokes.length === 1 && this.strokes[0].closed;
+    return { shapes: f.user.map((pts, i) => ({ pts, closed: this.strokes[i].closed, fill: single })), lineWidth };
   }
 
   /** Pointed at while resting: come back up and perform again. */
@@ -191,7 +242,15 @@ export class Doodle implements Creature {
     const since = this.t - this.phaseAt;
     if (this.phase === 'performing' && this.slot && since > PERFORM_MS) { this.phase = 'toPark'; this.phaseAt = this.t; }
     else if (this.phase === 'toPark' && since > MOVE_MS) { this.phase = 'parked'; this.phaseAt = this.t; }
-    else if (this.phase === 'toStage' && since > MOVE_MS) { this.phase = 'performing'; this.phaseAt = this.t; }
+    else if (this.phase === 'toStage' && since > MOVE_MS) {
+      // back on stage: its Runway clip if it has one, else the built-in animation
+      this.phase = this.clip && this.runwayFit ? 'clip' : 'performing';
+      this.phaseAt = this.t;
+      this.clipStarted = false;
+    } else if (this.phase === 'clip') {
+      if (!this.clipStarted) { this.clip!.start(); this.clipStarted = true; }
+      if (this.clip!.ended || since > 30000) { this.phase = 'afterClip'; this.phaseAt = this.t; }
+    } else if (this.phase === 'afterClip' && since > AFTER_CLIP_MS) { this.phase = this.slot ? 'toPark' : 'performing'; this.phaseAt = this.t; }
   }
 
   /** Centre and scale right now: on stage, resting in its slot, or on the way between. */
@@ -202,6 +261,12 @@ export class Doodle implements Creature {
     if (this.phase === 'parked') return { c: slot, scale: s, energy: 0.3 };
     if (this.phase === 'toStage') return { c: { x: slot.x + (this.home.x - slot.x) * e, y: slot.y + (this.home.y - slot.y) * e }, scale: s + (1 - s) * e, energy: 1 };
     return { c: this.home, scale: 1, energy: 1 };
+  }
+
+  /** Where its Runway clip goes on the wall: the drawing in the video lands on the drawing here. */
+  private clipRect(): Box {
+    const f = this.runwayFit!, c = this.home;
+    return { x: c.x + f.cx - f.w / 2 / f.s, y: c.y + f.cy - f.h / 2 / f.s, w: f.w / f.s, h: f.h / f.s };
   }
 
   /** Small loops and paces around its spot while performing. */
@@ -234,7 +299,8 @@ export class Doodle implements Creature {
   private frame(): { user: Pt[][]; clean: Pt[][] } {
     const settle = Math.min(1, this.t / SETTLE_MS), se = settle * settle * (3 - 2 * settle);
     const bk = Math.min(1, Math.max(0, (this.t - this.beautifyAt) / BEAUTIFY_MS)), be = bk * bk * (3 - 2 * bk) * 0.6;
-    const m = this.motion, t = Math.max(0, this.t - this.aliveAt), s = this.size;
+    const still = this.phase === 'clip' || this.phase === 'afterClip';
+    const m = still ? null : this.motion, t = Math.max(0, this.t - this.aliveAt), s = this.size;
     const { c, scale: place, energy } = this.placement();
     const wake = (m ? Math.min(1, t / WAKE_MS) : 0) * energy;
     const performing = this.phase === 'performing' ? wake : 0; // it only roams its spot while on stage
@@ -276,12 +342,21 @@ export class Doodle implements Creature {
   }
 
   draw(ctx: CanvasRenderingContext2D): void {
-    if (this.done) return;
+    if (this.done || this.veil <= 0) return;
     const { user, clean } = this.frame();
     const k = this.clean ? this.redrawK() : 0;
     const { scale } = this.placement();
+    // a Runway clip plays in its place; the still drawing fades back in as it ends
+    let ink = this.fade * this.veil;
+    if (this.phase === 'clip' && this.clip) {
+      const left = this.clip.remainingMs, back = Number.isFinite(left) ? Math.max(0, Math.min(1, 1 - left / CLIP_FADE_MS)) : 0;
+      this.clip.draw(ctx, this.clipRect(), ink * (1 - back));
+      ink *= back;
+      if (ink <= 0) return;
+    }
+    const fade = ink;
     ctx.save();
-    applyShadowStyle(ctx, this.fade);
+    applyShadowStyle(ctx, fade);
     ctx.filter = 'none'; // crisp ink, exactly like the line you drew — not a blurry shadow
     ctx.fillStyle = ctx.strokeStyle = INK;
     ctx.lineWidth = Math.max(3.5, INK_W * Math.sqrt(scale)); // same weight as the pen's ink; a little lighter at rest
@@ -289,7 +364,7 @@ export class Doodle implements Creature {
     ctx.lineJoin = 'round';
     // your lines, fading as the clean drawing draws itself over them
     if (k < 1) {
-      ctx.globalAlpha = this.fade * (1 - k);
+      ctx.globalAlpha = fade * (1 - k);
       const fillOne = user.length === 1 && this.strokes[0].closed && !this.clean;
       for (const pts of user) {
         ctx.beginPath();
@@ -300,7 +375,7 @@ export class Doodle implements Creature {
     }
     if (clean.length && k > 0) {
       // drawn on along its length, like a pen
-      ctx.globalAlpha = this.fade;
+      ctx.globalAlpha = fade;
       const lens = clean.map((pts, si) => { let L = 0; for (let i = 1; i < pts.length; i++) L += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y); if (this.clean![si].closed) L += Math.hypot(pts[0].x - pts[pts.length - 1].x, pts[0].y - pts[pts.length - 1].y); return L; });
       let budget = k * lens.reduce((a, b) => a + b, 0);
       clean.forEach((pts, si) => {
@@ -319,7 +394,7 @@ export class Doodle implements Creature {
         budget -= lens[si];
       });
     }
-    ctx.globalAlpha = this.fade;
+    ctx.globalAlpha = fade;
     if (this.motion === 'walk' && !this.clean && this.phase !== 'parked' && this.t > this.aliveAt) {
       const b = this.box(), t = this.t - this.aliveAt;
       for (const [k, ph] of [[0.35, 0], [0.65, Math.PI]] as const) {
@@ -334,7 +409,7 @@ export class Doodle implements Creature {
       const b = this.box(), a = Math.min(1, lt / 300) * Math.min(1, (LABEL_MS - lt) / 500);
       ctx.save();
       ctx.filter = 'none';
-      ctx.globalAlpha = a * this.fade;
+      ctx.globalAlpha = a * fade;
       ctx.fillStyle = INK;
       ctx.font = `300 ${Math.round(20 * devicePixelRatioSafe())}px "SF Pro Display", "Helvetica Neue", system-ui, sans-serif`;
       ctx.textAlign = 'center';

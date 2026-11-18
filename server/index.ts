@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { createServer } from 'node:http';
 import { saveCalibrationFrames, saveCapture, saveDoodle } from './captures';
+import { ClipWatcher, saveRunwayInput, serveClip, streamClipEvents, type RunwayExport } from './runway';
 import { handleHealth, type HealthClient } from './health';
 import { jevHealth, MODEL, recognizeDoodleWithJev, recognizeWithJev } from './jev';
 import { CLIENT_OPTIONS, handleRecognize, UNKNOWN, type RecognizeClient } from './recognize';
@@ -22,6 +23,10 @@ try {
   console.error('No Anthropic credentials:', err instanceof Error ? err.message : err);
 }
 
+const clips = new ClipWatcher();
+clips.start();
+clips.onClip((f) => console.log(`[runway] clip ready: captures/runway-out/${f}`));
+
 createServer(async (req, res) => {
   const json = (body: unknown) => res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(body));
   if (req.method === 'GET' && req.url === '/api/health') return json(OPENROUTER_KEY ? await jevHealth(OPENROUTER_KEY) : await handleHealth(anthropic as unknown as HealthClient, { keySet: !!process.env.ANTHROPIC_API_KEY }));
@@ -35,6 +40,21 @@ createServer(async (req, res) => {
     try { saveDoodle('captures/doodles', png, rec.what, rec.motion, ms, MODEL); } catch { /* saving is best-effort */ }
     return json(rec);
   }
+  // Runway, phase 1: exports in, clips out (server/runway.ts)
+  if (req.method === 'POST' && req.url === '/api/runway/in') {
+    const chunks: Buffer[] = [];
+    for await (const c of req) chunks.push(c as Buffer);
+    try {
+      const name = saveRunwayInput(JSON.parse(Buffer.concat(chunks).toString('utf8')) as RunwayExport);
+      console.log(`[runway] saved captures/runway-in/${name}.png + .txt`);
+      return json({ ok: true, name });
+    } catch (err) {
+      res.writeHead(400).end(String(err instanceof Error ? err.message : err));
+      return;
+    }
+  }
+  if (req.method === 'GET' && req.url === '/api/runway/events') return streamClipEvents(req, res, clips);
+  if (req.method === 'GET' && req.url?.startsWith('/api/runway/out/')) return serveClip(req, res, decodeURIComponent(req.url.slice('/api/runway/out/'.length).split('?')[0]));
   if (req.method === 'POST' && req.url?.startsWith('/api/calibration')) {
     const chunks: Buffer[] = [];
     for await (const c of req) chunks.push(c as Buffer);

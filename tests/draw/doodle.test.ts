@@ -100,3 +100,53 @@ describe('Doodle', () => {
     expect(d.done).toBe(true);
   });
 });
+
+import { fitForExport } from '../../src/runway/export';
+
+describe('Doodle with a Runway clip', () => {
+  const circle = Array.from({ length: 60 }, (_, i) => ({ x: 600 + Math.cos((i / 60) * Math.PI * 2) * 80, y: 300 + Math.sin((i / 60) * Math.PI * 2) * 80 }));
+  const fakeClip = () => {
+    const c = { started: 0, ended: false, remainingMs: 4000, drawn: 0, start() { this.started++; }, draw() { this.drawn++; } };
+    return c;
+  };
+  it('gets an id from when it was drawn and what it is', () => {
+    const d = new Doodle([circle], { w: 1280, h: 720 });
+    d.comeAlive('beat', 'heart');
+    expect(d.id).toMatch(/^\d{8}-\d{6}-heart$/);
+  });
+  it('the export fits the drawing in the middle of a 1280x720 image', () => {
+    const fit = fitForExport([{ pts: [{ x: -50, y: -20 }, { x: 50, y: 20 }], closed: false, fill: false }]);
+    expect(fit.cx).toBe(0);
+    expect(fit.s).toBeCloseTo((1280 * 0.7) / 100);
+  });
+  it('wakes into its clip, then the still drawing, then back to its place', () => {
+    const d = new Doodle([circle], { w: 1280, h: 720 });
+    d.comeAlive('beat', 'heart');
+    d.park({ x: 1200, y: 680 }, 0.4);
+    d.runwayFit = fitForExport(d.restShape());
+    const clip = fakeClip();
+    d.attachClip(clip);
+    for (let t = 0; t < 8000; t += 50) d.update(50); // performs, walks to its place
+    expect(d.parked).toBe(true);
+    d.wake();
+    for (let t = 0; t < 1800; t += 50) d.update(50); // back up on stage
+    d.update(50);
+    expect(d.playingClip).toBe(true);
+    expect(clip.started).toBe(1);
+    clip.ended = true;
+    d.update(50);
+    expect(d.playingClip).toBe(false);
+    for (let t = 0; t < 1600; t += 50) d.update(50);
+    for (let t = 0; t < 1800; t += 50) d.update(50);
+    expect(d.parked).toBe(true); // and rests again
+  });
+  it('without a clip it wakes into its built-in animation, as before', () => {
+    const d = new Doodle([circle], { w: 1280, h: 720 });
+    d.comeAlive('beat', 'heart');
+    d.park({ x: 1200, y: 680 }, 0.4);
+    for (let t = 0; t < 8000; t += 50) d.update(50);
+    d.wake();
+    for (let t = 0; t < 1900; t += 50) d.update(50);
+    expect(d.playingClip).toBe(false);
+  });
+});
