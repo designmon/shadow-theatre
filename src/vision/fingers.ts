@@ -10,7 +10,7 @@ import type { Pt } from '../types';
  * happens to stick out further from the edge doesn't steal it.
  */
 export type Finger = { tip: Pt; dir: Pt; length: number; width: number };
-export type Hand = { fingers: Finger[]; palmR: number; palm: Pt; palmIndex: number };
+export type Hand = { fingers: Finger[]; palmR: number; palm: Pt; palmIndex: number; /** distance to the shadow's edge, per pixel */ depth: Float32Array };
 
 /** Chamfer (3-4) distance to the nearest pixel NOT in `inside`, in px. */
 function distanceInside(inside: Uint8Array, W: number, H: number): Float32Array {
@@ -45,15 +45,25 @@ function distanceInside(inside: Uint8Array, W: number, H: number): Float32Array 
 function findPalm(pixels: number[], dist: Int32Array, far: number, dt: Float32Array): number | null {
   const prof = new Float32Array(far + 1), at = new Int32Array(far + 1).fill(-1);
   for (const i of pixels) { const d = dist[i]; if (d >= 0 && dt[i] > prof[d]) { prof[d] = dt[i]; at[d] = i; } }
-  let best = -1, bestR = 0, narrowFor = 0;
+  // walking back from the far end: how wide does the hand get before the wrist?
+  let bestR = 0, bestD = -1, narrowFor = 0;
   for (let d = far; d >= 0; d--) {
     const r = prof[d];
     if (at[d] < 0) continue;
-    if (far - d <= 6 * r && r >= 0.97 * bestR) { bestR = Math.max(bestR, r); best = at[d]; narrowFor = 0; } // ties: further back (a flat hand's palm is behind its fingers)
-    else if (best >= 0 && r < 0.85 * bestR) { if (++narrowFor > Math.max(2, 0.5 * bestR)) break; } // past the wrist
+    if (far - d <= 6 * r && r >= 0.97 * bestR) { bestR = Math.max(bestR, r); bestD = d; narrowFor = 0; } // ties: further back (a flat hand's palm is behind its fingers)
+    else if (bestD >= 0 && r < 0.85 * bestR) { if (++narrowFor > Math.max(2, 0.5 * bestR)) break; } // past the wrist
     else narrowFor = 0;
   }
-  return best >= 0 ? best : null;
+  if (bestD < 0) return null;
+  // The palm is the MIDDLE of that wide stretch, not its single widest pixel: where the hand and arm
+  // are about equally wide, "the widest" jumps along the arm from frame to frame; the middle doesn't.
+  let lo = bestD, hi = bestD;
+  while (hi + 1 <= far && at[hi + 1] >= 0 && prof[hi + 1] >= 0.9 * bestR) hi++;
+  while (lo - 1 >= 0 && at[lo - 1] >= 0 && prof[lo - 1] >= 0.9 * bestR && far - (lo - 1) <= 6 * bestR) lo--;
+  // (toward the far end from the widest point, at most a palm's width: keeps a flat hand's palm behind its fingers)
+  hi = Math.min(hi, bestD + Math.round(bestR));
+  const mid = Math.round((lo + hi) / 2);
+  return at[mid] >= 0 ? at[mid] : at[bestD];
 }
 
 /**
@@ -146,7 +156,7 @@ export function findFingers(inBlob: Uint8Array, W: number, H: number, pixels: nu
     for (const i of comp) steps[i] = -1;
   }
   fingers.sort((a, b) => b.length - a.length);
-  return { fingers, palmR, palm: { x: px + 0.5, y: py + 0.5 }, palmIndex: palmI };
+  return { fingers, palmR, palm: { x: px + 0.5, y: py + 0.5 }, palmIndex: palmI, depth: dt };
 }
 
 /** The fingers that count: long ones (the thumb or a half-curled finger next to a long finger doesn't). */

@@ -158,6 +158,9 @@ export async function recognizeDoodleWithJev(png: Buffer, apiKey: string, fetchF
     const confidence = probs[what] ?? answers?.what?.confidence ?? 0;
     // the runner-up guesses: when it isn't sure, the drawing asks you (cat or dog?)
     const alternatives = Object.entries(probs).filter(([k]) => k !== 'something').map(([k, p]) => ({ what: k, p: Number(p) || 0 })).sort((a, b) => b.p - a.p).slice(0, 3);
+    // "something" but with a fair runner-up: take the best real guess, so a rough drawing still
+    // becomes something nice (rather than staying a scribble)
+    if (what === 'something' && alternatives[0] && alternatives[0].p >= 0.18) return { what: alternatives[0].what, motion, confidence: alternatives[0].p, alternatives };
     return { what, motion, confidence, alternatives };
   } catch (err) {
     return fallback(`${model} unreachable: ${err instanceof Error ? err.message : err}`);

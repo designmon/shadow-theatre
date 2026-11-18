@@ -344,3 +344,31 @@ describe('drawing near the edge, and with the thumb out', () => {
     expect(s.tip.x).toBeGreaterThan(184);
   });
 });
+
+describe('drawing: the fingertip seen, a bare finger, or hidden', () => {
+  const lit = fillRect(mask(W, H), 20, 20, 280, 200, 1);
+  it('only the finger pokes into the picture (hand below the edge): its end is the fingertip', () => {
+    const m = mask(W, H);
+    fillRect(m, 150, 150, 7, 70, 1); // a bare finger coming up from the bottom edge
+    const s = analyzeScene(m, findBlobs(m), lit, { x: 153, y: 153 }, { fingerHalf: 3.5 })!;
+    expect(s.tipHidden).toBeFalsy();
+    expect(s.pose).toBe('point');
+    expect(s.tip.y).toBeLessThan(154);
+  });
+  it('the hand closes while drawing: the fingertip is gone, and it reads as a fist (not a knuckle taken for the tip)', () => {
+    const m = mask(W, H);
+    fillRect(m, 20, 112, 90, 14, 1); // forearm
+    fillRect(m, 105, 96, 44, 40, 1); // a closed hand
+    const s = analyzeScene(m, findBlobs(m), lit, { x: 188, y: 108 }, { fingerHalf: 4 })!; // the tip was out at x=188
+    expect(s.tipHidden).toBe(true);
+    expect(s.pose).toBe('fist');
+    expect(s.handRef).toBeTruthy();
+  });
+  it('the rounded end of a fist right next to the last tip is too thick to be a fingertip', () => {
+    const m = mask(W, H);
+    fillRect(m, 20, 112, 90, 14, 1);
+    fillRect(m, 105, 96, 44, 40, 1);
+    const s = analyzeScene(m, findBlobs(m), lit, { x: 152, y: 116 }, { fingerHalf: 4 })!; // prevTip just off the fist's edge
+    expect(s.tipHidden).toBe(true);
+  });
+});

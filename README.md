@@ -86,8 +86,8 @@ Your hand is the pen, with three gestures:
 | Gesture | What happens |
 | --- | --- |
 | **Point one finger** and rest it a moment | a thin ring closes: the pen is on, at your fingertip |
-| **Move while pointing** | you draw one continuous line. Only your fingertip counts: if it passes over your hand's own shadow, the pen waits for it instead of jumping. The ink trails your fingertip on a short string, so a shaky hand still draws a steady line |
-| **Rest your fingertip still** (about a second) | a ring fills, and the drawing is finished. (Pulling your hand out of the light also finishes) |
+| **Move while pointing** | you draw one continuous line, as slowly and as small as you like (there is no timer). If your fingertip's shadow disappears into your hand's own shadow, the pen carries on with your hand's movement and picks the fingertip up again when it shows |
+| **Close your hand** (a fist, hand at rest) | the drawing is finished, in about a third of a second. (Pulling your hand out of the light also finishes) |
 
 When you finish, a clean drawing of what it is draws itself over your line and it moves the
 way that thing moves: a heart beats, a cat or dog walks, a bird flies, a fish swims. Then it goes

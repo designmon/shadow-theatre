@@ -6,7 +6,7 @@ import { findFingers, longFingers, pickFinger, refineTip } from './fingers';
 /** pointing: one thin finger sticking out (laser drawing); tip: its fingertip; tipDir: which way it points. */
 /** pose: point = one finger out (pen draws), fist = closed hand (finish), open = anything else (pen lifted). */
 export type Pose = 'point' | 'fist' | 'open';
-export type Scene = { puppet: Mask; puppetBox: Box; entry: Side | null; openSide: Side; bodyBox: Box | null; neck: number | null; pointing: boolean; tip: Pt; tipDir: Pt; pose: Pose; palm?: Pt };
+export type Scene = { puppet: Mask; puppetBox: Box; entry: Side | null; openSide: Side; bodyBox: Box | null; neck: number | null; pointing: boolean; tip: Pt; tipDir: Pt; pose: Pose; palm?: Pt; /** drawing, but the fingertip can't be seen this frame (merged into the hand's own shadow, or the hand closed) */ tipHidden?: boolean; palmR?: number; /** the centre of the hand end of the shadow: steady (hundreds of pixels), for how the hand moves */ handRef?: Pt };
 
 const TIP_FRACTION = 0.3;
 const MIN_TIP_FRACTION = 0.12; // smallest puppet window, of the wall size
@@ -29,7 +29,7 @@ function boxOf(indices: Iterable<number>, W: number): Box | null {
  * tip, where the hands are), and the open side for creatures to move into.
  */
 /** Remembered between frames: where the arm comes in (it doesn't jump; a hand touching another edge later shouldn't move it). */
-export type SceneMemory = { entry?: Pt; seenAt?: number };
+export type SceneMemory = { entry?: Pt; seenAt?: number; /** half the drawing finger's width (camera px), learnt while it is clearly seen */ fingerHalf?: number };
 
 export function analyzeScene(mask: Mask, blobs: Blob[], lit?: Mask, prevTip?: Pt | null, memory?: SceneMemory, litAt?: (x: number, y: number) => number): Scene | null {
   const blob = blobs[0];
@@ -195,25 +195,77 @@ export function analyzeScene(mask: Mask, blobs: Blob[], lit?: Mask, prevTip?: Pt
   // only where the ARM comes in is "the arm" — a fingertip touching another edge of the picture
   // (drawing near the bottom) is still a finger
   const handShape = findFingers(inBlob, W, H, Array.from(blob.pixels), (i) => entryPx.has(i), dist, far);
-  // drawing: keep following the finger the pen is on, whatever else the hand is doing (a thumb out,
-  // other fingers showing) — it only waits if no finger is anywhere near where the tip just was
-  const tracked = prevTip && handShape
-    ? handShape.fingers.filter((f) => f.length >= 0.6 * handShape.palmR).sort((a, b) => Math.hypot(a.tip.x - prevTip.x, a.tip.y - prevTip.y) - Math.hypot(b.tip.x - prevTip.x, b.tip.y - prevTip.y))[0]
-    : undefined;
-
-  if (handShape && tracked && Math.hypot(tracked.tip.x - prevTip!.x, tracked.tip.y - prevTip!.y) <= 3 * handShape.palmR) {
+  // Drawing (prevTip = where the fingertip just was): stay on that fingertip.
+  //  1. a real finger whose tip is near it: that's it (a thumb or other fingers showing don't matter);
+  //  2. else any end of the shadow right there (only the finger pokes into the picture, no palm to
+  //     measure fingers against): that's it;
+  //  3. else the fingertip can't be seen — merged into the hand's own shadow, or the hand closed.
+  //     Say so (tipHidden) with the hand's real shape, and the pen carries on with the hand's movement.
+  // the hand end of the shadow (a hand's length back from its far end), as one steady point
+  const handBand = Math.max(10, Math.max(wallW, wallH) * 0.14);
+  let hx = 0, hy = 0, hn = 0;
+  for (const i of blob.pixels) if (dist[i] >= far - handBand) { hx += i % W; hy += (i / W) | 0; hn++; }
+  const handRef = hn ? { x: hx / hn + 0.5, y: hy / hn + 0.5 } : undefined;
+  let tipHidden = false, trackedTip = false;
+  if (prevTip) {
+    const R = handShape?.palmR ?? 0, near = Math.max(2 * R, 10);
+    const f = handShape?.fingers.filter((q) => q.length >= R).sort((a, b) => Math.hypot(a.tip.x - prevTip.x, a.tip.y - prevTip.y) - Math.hypot(b.tip.x - prevTip.x, b.tip.y - prevTip.y))[0];
+    if (f && Math.hypot(f.tip.x - prevTip.x, f.tip.y - prevTip.y) <= near) {
+      finger.tip = litAt ? refineTip(f.tip, f.dir, litAt, f.width) : f.tip;
+      finger.tipDir = f.dir;
+      trackedTip = true;
+      if (memory) memory.fingerHalf = memory.fingerHalf ? memory.fingerHalf * 0.8 + (f.width / 2) * 0.2 : f.width / 2;
+    } else {
+      // an end of the shadow close by: the pixel furthest along the shadow within reach, if nothing next to it goes further
+      const reach = Math.max(1.2 * R, 8);
+      let best = -1, bd = -1;
+      for (const i of blob.pixels) {
+        const x = i % W, y = (i / W) | 0;
+        if (Math.hypot(x + 0.5 - prevTip.x, y + 0.5 - prevTip.y) <= reach && dist[i] > bd) { bd = dist[i]; best = i; }
+      }
+      let isEnd = best >= 0;
+      if (isEnd) {
+        const bx = best % W, by = (best / W) | 0;
+        for (let dy = -4; dy <= 4 && isEnd; dy++) for (let dx = -4; dx <= 4; dx++) {
+          const x = bx + dx, y = by + dy;
+          if (x < 0 || y < 0 || x >= W || y >= H) continue;
+          if (inBlob[y * W + x] && dist[y * W + x] > bd + 1) { isEnd = false; break; }
+        }
+      }
+      if (isEnd && handShape) {
+        // ...and only if the shadow is finger-thin there: the rounded end of a fist or the hand's
+        // edge is an "end" too, but far too thick to be the fingertip
+        const thin = (memory?.fingerHalf ?? Math.max(wallW, wallH) * 0.02) * 1.5 + 1, look = Math.max(6, 3 * thin);
+        const bx = best % W, by = (best / W) | 0;
+        for (const i of blob.pixels) {
+          if (Math.hypot((i % W) - bx, ((i / W) | 0) - by) <= look && handShape.depth[i] > thin) { isEnd = false; break; }
+        }
+      }
+      if (isEnd) {
+        // average the very end, and point the way the shadow runs there
+        let tx = 0, ty = 0, tn = 0, cx = 0, cy = 0, cn = 0;
+        for (const i of blob.pixels) {
+          const x = i % W, y = (i / W) | 0, d = Math.hypot(x - (best % W), y - ((best / W) | 0));
+          if (d <= 2 && dist[i] >= bd - 1) { tx += x; ty += y; tn++; }
+          if (d <= 8 && dist[i] < bd - 3) { cx += x; cy += y; cn++; }
+        }
+        const t0 = { x: tx / tn + 0.5, y: ty / tn + 0.5 };
+        const dir = cn ? { x: t0.x - (cx / cn + 0.5), y: t0.y - (cy / cn + 0.5) } : finger.tipDir;
+        const dl = Math.hypot(dir.x, dir.y) || 1;
+        finger.tipDir = { x: dir.x / dl, y: dir.y / dl };
+        finger.tip = litAt ? refineTip(t0, finger.tipDir, litAt, 4) : t0;
+        trackedTip = true;
+      } else tipHidden = true;
+    }
+  }
+  if (trackedTip) {
     pose = 'point';
-    finger.tip = litAt ? refineTip(tracked.tip, tracked.dir, litAt, tracked.width) : tracked.tip;
-    finger.tipDir = tracked.dir;
     finger.pointing = true;
   } else if (handShape) {
     const long = longFingers(handShape);
     if (long.length) {
       const f = pickFinger(handShape, prevTip ?? null)!;
       pose = long.length === 1 ? 'point' : 'open';
-      // drawing, and the only finger in sight is far from where the fingertip just was: that's not
-      // the fingertip (it's hidden over the hand's own shadow) — say so, and the pen waits for it
-      if (prevTip && Math.hypot(f.tip.x - prevTip.x, f.tip.y - prevTip.y) > 3 * handShape.palmR) pose = 'open';
       finger.tip = litAt ? refineTip(f.tip, f.dir, litAt, f.width) : f.tip; // between pixels: a steady line
       finger.tipDir = f.dir;
       finger.pointing = pose === 'point';
@@ -225,7 +277,7 @@ export function analyzeScene(mask: Mask, blobs: Blob[], lit?: Mask, prevTip?: Pt
       pose = beyondPalm <= 2.1 * handShape.palmR ? 'fist' : 'open'; // (steps along the shadow overstate diagonals a little)
     }
   }
-  return { puppet, puppetBox: boxOf(tip, W)!, entry: opposite[openSide], openSide, bodyBox: boxOf(body, W), neck, ...finger, pose, palm: handShape?.palm };
+  return { puppet, puppetBox: boxOf(tip, W)!, entry: opposite[openSide], openSide, bodyBox: boxOf(body, W), neck, ...finger, pose, palm: handShape?.palm, tipHidden, palmR: handShape?.palmR, handRef };
 }
 
 const MAX_PUPPET_FRACTION = 0.5; // of the lit wall (bodies are caught by the hand-sticking-out rule)

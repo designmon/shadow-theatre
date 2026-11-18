@@ -31,15 +31,45 @@ function chaikin(pts: Pt[], passes: number, closed: boolean): Pt[] {
 }
 
 /**
- * The finished line, refined: wobbles removed (simplify), corners rounded (Chaikin).
+ * Blur along the line's length (Gaussian, sigma px): removes tremor (short wavelength) while small
+ * shapes survive — a circle of radius 15 px keeps 95% of its size at sigma 5.
+ */
+export function smoothAlong(pts: Pt[], sigma = 5, step = 2): Pt[] {
+  if (pts.length < 3) return pts;
+  // evenly spaced along the line
+  const even: Pt[] = [pts[0]];
+  let carry = 0;
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1], b = pts[i], d = Math.hypot(b.x - a.x, b.y - a.y);
+    let at = step - carry;
+    while (at <= d) { even.push({ x: a.x + ((b.x - a.x) * at) / d, y: a.y + ((b.y - a.y) * at) / d }); at += step; }
+    carry = d - (at - step);
+  }
+  even.push(pts[pts.length - 1]);
+  const r = Math.ceil((2.5 * sigma) / step), w: number[] = [];
+  for (let k = -r; k <= r; k++) w.push(Math.exp(-((k * step) ** 2) / (2 * sigma * sigma)));
+  const n = even.length;
+  return even.map((_, i) => {
+    let sx = 0, sy = 0, sw = 0;
+    for (let k = -r; k <= r; k++) {
+      const j = Math.min(n - 1, Math.max(0, i + k)); // the ends stay where they are
+      sx += even[j].x * w[k + r]; sy += even[j].y * w[k + r]; sw += w[k + r];
+    }
+    return { x: sx / sw, y: sy / sw };
+  });
+}
+
+/**
+ * The finished line, refined: tremor blurred away along the line, then simplified a little, corners rounded (Chaikin).
  * A line whose end comes back near its start becomes a closed shape.
  */
-export function refineStroke(raw: Pt[]): { points: Pt[]; closed: boolean } {
+export function refineStroke(drawn: Pt[]): { points: Pt[]; closed: boolean } {
+  const raw = smoothAlong(drawn);
   const xs = raw.map((p) => p.x), ys = raw.map((p) => p.y);
   const size = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys), 1);
   const a = raw[0], z = raw[raw.length - 1];
   const closed = raw.length > 6 && Math.hypot(a.x - z.x, a.y - z.y) < size * 0.2;
-  const eps = Math.max(4, size * 0.032); // a little more: wobbles from a hand in the air smooth out
+  const eps = Math.max(2.5, size * 0.012); // gentle: small details (eyes, little circles) survive
   let simple: Pt[];
   if (closed) {
     // a loop: split at the point farthest from the start, simplify both halves (start == end breaks RDP)
@@ -48,5 +78,5 @@ export function refineStroke(raw: Pt[]): { points: Pt[]; closed: boolean } {
     simple = [...simplify(raw.slice(0, m + 1), eps).slice(0, -1), ...simplify(raw.slice(m), eps)];
   } else simple = simplify(raw, eps);
   const pts = closed ? simple.slice(0, -1) : simple;
-  return { points: chaikin(pts, 4, closed), closed };
+  return { points: chaikin(pts, 3, closed), closed };
 }

@@ -47,20 +47,40 @@ describe('LaserPen: one line, drawn by the fingertip alone', () => {
     expect(after.strokes.length).toBe(1);
     expect(after.strokes[0].length).toBeGreaterThan(n);
   });
-  it('resting the fingertip still finishes the drawing (a ring fills), once, with a burst', () => {
+  it('resting, or drawing slowly, never ends the drawing (no timer)', () => {
     const pen = new LaserPen();
     run(pen, 0, 600, () => ({ x: 500, y: 300 }));
     run(pen, 633, 2000, arc(633, 500));
-    const resting = run(pen, 2033, 2900, () => ({ x: 705, y: 310 }));
-    expect(resting.mode).toBe('down');
-    expect(resting.finish).toBeGreaterThan(0.3);
-    const s = run(pen, 2933, 3700, () => ({ x: 705, y: 310 }));
-    expect(s.mode).toBe('idle');
+    const s = run(pen, 2033, 7000, () => ({ x: 705, y: 310 })); // five seconds of thinking
+    expect(s.mode).toBe('down');
+    expect(s.finish).toBe(0);
+  });
+  it('a fist finishes the drawing quickly, once, with a burst', () => {
+    const pen = new LaserPen();
+    run(pen, 0, 600, () => ({ x: 500, y: 300 }));
+    run(pen, 633, 2000, arc(633, 500));
+    expect(run(pen, 2033, 2133, () => ({ x: 700, y: 310 }), 'fist').mode).toBe('down'); // a flicker isn't enough
+    const s = run(pen, 2166, 2333, () => ({ x: 700, y: 310 }), 'fist');
+    expect(s.mode).toBe('idle'); // a third of a second after closing the hand
     const done = pen.takeFinished()!;
     expect(done.length).toBe(1);
     expect(done[0].length).toBeGreaterThan(10);
     expect(pen.takeFinished()).toBeNull();
     expect(pen.takeBursts().some((b) => b.kind === 'finish')).toBe(true);
+  });
+  it('a small circle (an eye) is drawn as a small circle, and survives the clean-up', async () => {
+    const { refineStroke } = await import('../../src/draw/refine');
+    const pen = new LaserPen();
+    run(pen, 0, 600, () => ({ x: 500, y: 300 }));
+    run(pen, 633, 1500, (t) => ({ x: 500 + (t - 633) * 0.2, y: 300 })); // a line to where the eye goes
+    const cx = 673, cy = 285, r = 15;
+    const s = run(pen, 1533, 3000, (t) => { const a = ((t - 1533) / 1400) * Math.PI * 2 + Math.PI / 2; return { x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r }; });
+    const eye = s.strokes[0].filter((p) => p.x > 650);
+    const w = Math.max(...eye.map((p) => p.x)) - Math.min(...eye.map((p) => p.x)), h = Math.max(...eye.map((p) => p.y)) - Math.min(...eye.map((p) => p.y));
+    expect(w).toBeGreaterThan(20); // 30 px drawn
+    expect(h).toBeGreaterThan(20);
+    const refined = refineStroke(s.strokes[0]).points.filter((p) => p.x > 655);
+    expect(Math.max(...refined.map((p) => p.y)) - Math.min(...refined.map((p) => p.y))).toBeGreaterThan(18);
   });
   it('pulling the hand out of the light also finishes, without the slide back along the finger', () => {
     const pen = new LaserPen();
@@ -88,5 +108,25 @@ describe('LaserPen: one line, drawn by the fingertip alone', () => {
     const ys = s.strokes[0].slice(3).map((p) => p.y);
     expect(Math.max(...ys) - Math.min(...ys)).toBeLessThan(5);
     expect(Math.max(...s.strokes[0].map((p) => p.x))).toBeGreaterThan(900);
+  });
+  it('ink drawn while the fingertip is hidden is kept when the finger shows again, dropped if the drawing ends first', () => {
+    const feed = (pen: LaserPen, from: number, to: number, f: (t: number) => { x: number; y: number }, guess: boolean, pose: Pose = 'point') => { let last; for (let t = from; t <= to; t += 33) last = pen.update({ tip: f(t), pose, guess }, t); return last!; };
+    // hidden for a while, then seen again: one line, all of it
+    const a = new LaserPen();
+    run(a, 0, 600, () => ({ x: 500, y: 300 }));
+    feed(a, 633, 1500, (t) => ({ x: 500 + (t - 633) * 0.2, y: 300 }), false);
+    feed(a, 1533, 2200, (t) => ({ x: 500 + (t - 633) * 0.2, y: 300 }), true);
+    feed(a, 2233, 2800, (t) => ({ x: 500 + (t - 633) * 0.2, y: 300 }), false);
+    feed(a, 2833, 3200, () => ({ x: 930, y: 300 }), false, 'fist');
+    expect(Math.max(...a.takeFinished()![0].map((p) => p.x))).toBeGreaterThan(900);
+    // hidden, and then the hand closes and leaves: the hidden part was never drawing
+    const b = new LaserPen();
+    run(b, 0, 600, () => ({ x: 500, y: 300 }));
+    feed(b, 633, 1500, (t) => ({ x: 500 + (t - 633) * 0.2, y: 300 }), false);
+    feed(b, 1533, 2200, (t) => ({ x: 673 - (t - 1533) * 0.5, y: 300 }), true); // the fist being pulled away
+    run(b, 2233, 3400, () => null);
+    const done = b.takeFinished()![0];
+    expect(Math.min(...done.map((p) => p.x))).toBeGreaterThan(490);
+    expect(done[done.length - 1].x).toBeGreaterThan(640);
   });
 });

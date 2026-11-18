@@ -61,6 +61,7 @@ const PUPPETS = false;
 let penState: PenState = { mode: 'idle', arm: 0, finish: 0, cursor: null, strokes: [] };
 let hovered: { d: Doodle; since: number; seen: number } | null = null;
 const sceneMemory: SceneMemory = {}; // where the arm comes in, kept between frames
+const hand: { tip: { x: number; y: number } | null; ref: { x: number; y: number } | null; wasHidden: boolean; speed: number; seenAt: number; trail: { x: number; y: number; t: number }[] } = { tip: null, ref: null, wasHidden: false, speed: 0, seenAt: 0, trail: [] }; // the drawing hand on the wall, frame to frame
 let lastTipCam: { x: number; y: number } | null = null; // the pen's finger last frame (camera px): stay on it
 let rawTip: { x: number; y: number } | null = null; // where the camera sees the fingertip this frame (debug: a small +) // a resting drawing the fingertip points at
 const WAKE_DWELL_MS = 500;
@@ -500,21 +501,64 @@ async function main() {
       if (penFree && !voice.listening && !thinking && waveDetector.feed(handAt, openHand, now)) startListening();
       if (voice.listening && stopSign.feed(handAt, openHand, now)) void submitVoice();
       const atButton = penFree && (voice.listening || (!!handAt && listeningUI.near(handAt, stage.size())));
-      // the fingertip, checked against the palm: no sliding back along the finger, no hops
+      // The fingertip for the pen. Seen: checked against the palm (no sliding back along the finger,
+      // no hops). Not seen while drawing (merged into the hand's own shadow): the hand moves as one
+      // piece, so the pen carries on with the palm's movement until the tip shows again. A closed,
+      // resting hand is a fist: done.
       let penTip = tipProj, penPose = scene?.pose ?? 'open';
+      const palmProj = scene?.palm ? applyH(calib.camToProj, scene.palm) : null;
+      const palmRProj = scene?.palm && scene.palmR ? Math.hypot(applyH(calib.camToProj, { x: scene.palm.x + scene.palmR, y: scene.palm.y }).x - palmProj!.x, applyH(calib.camToProj, { x: scene.palm.x + scene.palmR, y: scene.palm.y }).y - palmProj!.y) : 60;
+      const drawingNow = penState.mode === 'down';
+      // how the hand moves: the centre of the hand end of its shadow (steady), frame to frame.
+      // (Not across the moment the fingertip appears or disappears: the hand end changes shape then.)
+      const refProj = scene?.handRef ? applyH(calib.camToProj, scene.handRef) : null;
+      const hiddenNow = !!scene?.tipHidden;
+      const step = refProj && hand.ref && hiddenNow === hand.wasHidden ? { x: refProj.x - hand.ref.x, y: refProj.y - hand.ref.y } : null;
+      if (!refProj) hand.trail.length = 0;
+      else if (hand.ref && hiddenNow !== hand.wasHidden) {
+        // the hand end changed shape (the finger went or came): carry the history across that jump,
+        // so a hand that was already still when it closed counts as resting at once
+        const jx = refProj.x - hand.ref.x, jy = refProj.y - hand.ref.y;
+        for (const q of hand.trail) { q.x += jx; q.y += jy; }
+      }
+      if (refProj) hand.trail.push({ ...refProj, t: now });
+      while (hand.trail.length > 1 && now - hand.trail[1].t >= 300) hand.trail.shift();
+      const old = hand.trail[0];
+      // resting = the hand end hasn't gone anywhere over the last third of a second
+      const resting2 = !!old && !!refProj && now - old.t >= 150 && Math.hypot(refProj.x - old.x, refProj.y - old.y) < 14;
+      hand.speed = old && refProj && now > old.t ? Math.hypot(refProj.x - old.x, refProj.y - old.y) / (now - old.t) : 1;
+      let seen = false, guessing = false;
       if (tipProj && scene && penPose === 'point') {
-        const palmProj = scene.palm ? applyH(calib.camToProj, scene.palm) : null;
-        const guarded = tipGuard.feed(tipProj, palmProj, now);
-        if (guarded) penTip = guarded; else penPose = 'open'; // not trusted this frame: the pen waits
-      } else if (!scene) tipGuard.reset();
-      penState = pen.update(penTip && scene && !resting && !atButton ? { tip: penTip, pose: penPose, dir: dirProj } : null, now);
+        // while hidden, a finger showing up far from where the pen is isn't the drawing finger (the thumb, say)
+        const stray = drawingNow && scene.tipHidden && hand.tip && now - hand.seenAt < 1500 && Math.hypot(tipProj.x - hand.tip.x, tipProj.y - hand.tip.y) > 4 * palmRProj;
+        const guarded = stray ? null : tipGuard.feed(tipProj, palmProj, now);
+        if (guarded) { penTip = guarded; seen = true; hand.seenAt = now; }
+      }
+      if (!scene) tipGuard.reset();
+      if (drawingNow && scene && !seen) {
+        if (scene.pose === 'fist' && resting2) penPose = 'fist'; // closed and resting: finish
+        else if (hand.tip && now - hand.seenAt < 5000) {
+          // carry on with the hand (a misread frame moves nothing)
+          const ok = step && Math.hypot(step.x, step.y) < 60;
+          penTip = ok ? { x: hand.tip.x + step!.x, y: hand.tip.y + step!.y } : { ...hand.tip };
+          penPose = 'point';
+          guessing = true;
+        } else penPose = 'open';
+      }
+      hand.ref = refProj;
+      hand.wasHidden = hiddenNow;
+      if (penPose === 'point' && penTip) {
+        hand.tip = { ...penTip };
+        if (drawingNow) lastTipCam = applyH(calib.projToCam, penTip); // next frame: look for the fingertip here
+      } else if (!scene) hand.tip = null;
+      penState = pen.update(penTip && scene && !resting && !atButton ? { tip: penTip, pose: penPose, dir: dirProj, guess: guessing } : null, now);
       const finished = pen.takeFinished();
       if (finished) bringDrawingToLife(finished);
       for (const b of pen.takeBursts()) sparkles.burst(b.at, b.kind === 'finish' ? 16 : 10, b.kind === 'finish' ? 140 : 70);
       if (penState.mode === 'down' && penState.cursor) sparkles.trail(penState.cursor, dt); else sparkles.lift();
       if (scene?.pointing) lastPointingAt = now;
       if ((window as any).__trace) { (window as any).__mask = mask; (window as any).__lit = lit; (window as any).__handSeen = !!scene; (window as any).__doodles = doodles; (window as any).__wallClip = () => wallClip; (window as any).__caption = () => director.caption; (window as any).__story = () => story.last; (window as any).__voice = () => ({ listening: voice.listening, thinking }); (window as any).__runner = runner; (window as any).__playPlan = (p: Plan) => { story.add(p.story, performance.now()); runner.play(p, doodles()); }; }
-      if ((window as any).__trace) console.log('[trace]', Math.round(now), scene ? `pointing=${scene.pointing} tip=${Math.round(scene.tip.x)},${Math.round(scene.tip.y)} box=${JSON.stringify(scene.puppetBox)} usable=${!!usable}` : 'no scene', penState.mode, scene?.pose ?? '');
+      if ((window as any).__trace) console.log('[trace]', Math.round(now), scene ? `hid=${scene.tipHidden ? 1 : 0} spd=${hand.speed.toFixed(2)} pointing=${scene.pointing} tip=${Math.round(scene.tip.x)},${Math.round(scene.tip.y)} box=${JSON.stringify(scene.puppetBox)} usable=${!!usable}` : 'no scene', penState.mode, scene?.pose ?? '');
       const penNearby = penState.mode !== 'idle' || now - lastPointingAt < POINTING_QUIET_MS;
       if (penNearby) hold.reset(); // a pointing finger is a pen, not a puppet
       if (PUPPETS && scene && usable && !penNearby && hold.push(scene.puppet, now)) {

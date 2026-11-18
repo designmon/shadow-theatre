@@ -45,7 +45,7 @@ export function installSimCamera(stage: () => HTMLCanvasElement): void {
     const start = Number(params.get('start') ?? 3); // ?start=<s>: when the performer first walks in
     const cycle = (t - start) % 9;
     if (t > start && cycle < 6) {
-      const reach = Math.min(1, cycle / 1.2) * (cycle > 5 ? Math.max(0, 6 - cycle) : 1);
+      const reach = Math.min(1, cycle / 1.2) * (cycle > 5.7 ? Math.max(0, (6 - cycle) / 0.3) : 1); // (stops, makes a fist, then leaves)
       ctx.fillStyle = 'rgba(8,8,8,1)';
       ctx.fillRect(40, 140, 90, 360); // body against the left of the wall
       let hx = 130 + reach * 200, hy = 262;
@@ -56,7 +56,9 @@ export function installSimCamera(stage: () => HTMLCanvasElement): void {
       // ?click: every third visit, a fist over the stop button (top right), then the hand opens
       const clicking = shape === 'point' && params.has('click') && Math.floor((t - start) / 9) % 3 === 2;
       if (clicking) { hx = 130 + reach * 345; hy = 262 - reach * 125; pose = cycle > 1.6 && cycle < 2.4 ? 'blob' : 'point'; }
-      if (shape === 'point' && cycle >= 5 && !visiting && !clicking) pose = 'blob'; // close the hand into a fist: done
+      if (shape === 'point' && cycle >= 5 && !visiting && !clicking) pose = 'blob';
+      // ?hide: partway through the drawing the finger disappears into the hand's own shadow, then shows again
+      if (shape === 'point' && params.has('hide') && cycle > 3.3 && cycle < 4.1 && !visiting && !clicking) pose = 'blob'; // close the hand into a fist: done
       if (shape === 'point' && cycle > 2.6 && cycle < 5 && !visiting && !clicking) {
         // draw a loop with the fingertip (after holding still to get the laser)
         const a = ((cycle - 2.6) / 2.4) * Math.PI * 2;
