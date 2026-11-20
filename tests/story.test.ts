@@ -62,19 +62,7 @@ describe('voice commands acted out', () => {
   });
 });
 
-import { AiArtist } from '../src/draw/aiHand';
-
-describe('"draw a cat": the AI finger', () => {
-  it('comes in, draws every stroke, leaves, and hands over the drawing', () => {
-    const a = new AiArtist();
-    let got: unknown = null;
-    const strokes = [[{ x: 500, y: 400 }, { x: 700, y: 400 }], [{ x: 600, y: 300 }, { x: 600, y: 500 }]];
-    a.start(strokes, { w: 1920, h: 1080 }, (s) => (got = s));
-    expect(a.busy).toBe(true);
-    for (let t = 0; t < 6000 && a.busy; t += 16) a.update(16);
-    expect(a.busy).toBe(false);
-    expect(got).toEqual(strokes);
-  });
+describe('"draw a dog": an outline to trace, then the story carries on with what was traced', () => {
   it('a script can draw something new and then move it ("new")', async () => {
     const [cat] = cast('cat');
     let now = 0;

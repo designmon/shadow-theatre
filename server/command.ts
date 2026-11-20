@@ -35,8 +35,8 @@ Steps run in order. Each step is one of:
   {"do":"say","who":ID,"text":"…"}                a very short line in a speech bubble (max 5 words)
   {"do":"trick","who":ID,"kind":"jump|spin|shake|grow|rain"}   (rain: only for clouds)
   {"do":"wait","ms":N}                            a pause (300–2000)
-  {"do":"draw","what":"cat","place":PLACE}        draw something NEW on the wall (an AI finger draws it, then it comes alive). "what" = one or two plain words (cat, hot air balloon). Optional "near":ID instead of place.
-After a draw, later steps can use "new" as the ID of what was just drawn.
+  {"do":"draw","what":"cat","place":PLACE}        when the person asks to draw something NEW: a dotted outline appears for THEM to trace with their finger (you never draw it yourself). "what" = one or two plain words (cat, hot air balloon). Optional "near":ID instead of place. The story waits until they have traced it.
+After a draw, later steps can use "new" as the ID of what they traced. In the story text, invite them to trace it ("Trace the dotted cat…").
 Use only the IDs listed (and "new" after a draw). "this", "it", "these" mean the selected drawings. Something that isn't on the wall can't take part: narrate around it kindly.
 Keep it to at most 12 steps. Land a plane by sending it to the ground first. Make it charming, like a picture book.`;
 
@@ -76,7 +76,7 @@ export function validPlan(raw: unknown, items: SceneItem[]): Plan | null {
 export function simplePlan(text: string, items: SceneItem[]): Plan {
   const t = text.toLowerCase();
   const draw = /\bdraw\s+(?:me\s+)?(?:a|an|some|the)?\s*([a-z]+)/.exec(t) ?? /\b(?:make|add)\s+(?:me\s+)?(?:a|an|some)\s+([a-z]+)/.exec(t);
-  if (draw) return { story: `A ${draw[1]} appears on the wall.`, steps: [{ do: 'draw', what: draw[1] }], note: 'simple (no language model)' };
+  if (draw) return { story: `Trace the dotted ${draw[1]} to draw it.`, steps: [{ do: 'draw', what: draw[1] }], note: 'simple (no language model)' };
   const named = items.filter((i) => t.includes(i.label)).sort((a, b) => t.indexOf(a.label) - t.indexOf(b.label)); // the first one mentioned is the subject
   const actors = named.length ? named : items.filter((i) => i.selected);
   const steps: Step[] = [];

@@ -34,6 +34,7 @@ export class ScriptRunner {
   play(plan: Plan, doodles: Doodle[]): void {
     this.cast = new Map(doodles.filter((d) => d.id).map((d) => [d.id, d]));
     this.steps = [...plan.steps];
+    this.waiting = false; // a new command doesn't wait for an outline nobody traced
     this.nextAt = this.now();
     this.endAt = null;
     this.actors.clear();

@@ -13,7 +13,6 @@ import { ScriptRunner, type Plan } from './story/script';
 import { VoiceInput } from './voice/voice';
 import { StopSign, WaveDetector } from './vision/gestures';
 import { ListeningUI } from './ui/listening';
-import { AiArtist } from './draw/aiHand';
 import { fitIcon, ICONS } from './draw/icons';
 import { zoneOf } from './draw/composition';
 import { exportDrawing, exportScene } from './runway/export';
@@ -100,31 +99,60 @@ const listeningUI = new ListeningUI();
 let thinking = false;
 let lastCaptionAt = -1;
 const runner = new ScriptRunner(() => stage.size(), () => compositionArea(stage.size()), () => performance.now());
-// "draw a cat": the AI's finger comes in and draws it, then it comes alive like yours
-const artist = new AiArtist();
+// "draw a cat": the app doesn't draw it — it shows a dashed outline to trace with your finger.
+// What you trace over it becomes the cat (no guessing needed), and the story carries on with it.
+type Guide = { label: string; strokes: { x: number; y: number }[][]; box: { x: number; y: number; w: number; h: number }; at: number; done: (d: Doodle | null) => void; fadeAt: number | null };
+const guides: Guide[] = [];
+const GUIDE_MS = 120000; // an outline nobody traces goes away after two minutes
 runner.onDraw = async (what, at) => {
-  const { w, h } = stage.size(), size = h * 0.28;
+  const { h } = stage.size(), size = h * 0.42; // big: easy to trace
   const label = what.trim().split(' ').pop() ?? what; // "a big cat" -> cat
   let strokes: { x: number; y: number }[][] | null = null;
   const icon = ICONS[label] ? fitIcon(label, { cx: at.x, cy: at.y, w: size, h: size }) : null;
   if (icon) strokes = icon.map((st) => (st.closed ? [...st.pts, st.pts[0]] : st.pts));
   else {
-    // nothing ready-made: the model sketches it
+    // nothing ready-made: the model sketches the outline
     try {
       const r = await (await fetch('/api/sketch', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ what }) })).json();
       if (Array.isArray(r.strokes)) strokes = r.strokes.map((st: number[][]) => st.map(([x, y]) => ({ x: at.x + ((x - 50) / 100) * size, y: at.y + ((y - 50) / 100) * size })));
     } catch { /* below */ }
   }
-  if (!strokes?.length) { story.add(`(I don't know how to draw a ${what} yet)`, performance.now()); return null; }
-  return new Promise((resolve) => artist.start(strokes!, { w, h }, (drawn) => {
-    const d = new Doodle(drawn, { w, h });
-    creatures.push(d);
-    d.comeAlive(motionFor(label, 'float'), label, !!icon);
-    compose();
-    setTimeout(() => void exportDrawing(d), 1600);
-    resolve(d);
-  }));
+  if (!strokes?.length) { story.add(`(I don't have an outline for a ${what} yet)`, performance.now()); return null; }
+  const pts = strokes.flat(), xs = pts.map((q) => q.x), ys = pts.map((q) => q.y);
+  const box = { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) };
+  return new Promise<Doodle | null>((resolve) => { guides.push({ label, strokes: strokes!, box, at: performance.now(), done: resolve, fadeAt: null }); });
 };
+/** Was this drawing traced over an outline? (It sits on it, and is about its size.) */
+function tracedGuide(strokes: { x: number; y: number }[][]): Guide | null {
+  const pts = strokes.flat(), xs = pts.map((q) => q.x), ys = pts.map((q) => q.y);
+  const cx = (Math.min(...xs) + Math.max(...xs)) / 2, cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+  const size = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
+  return guides.find((g) => g.fadeAt === null && cx > g.box.x - 50 && cx < g.box.x + g.box.w + 50 && cy > g.box.y - 50 && cy < g.box.y + g.box.h + 50 && size > 0.35 * Math.max(g.box.w, g.box.h)) ?? null;
+}
+function drawGuides(ctx: CanvasRenderingContext2D, now: number): void {
+  for (let i = guides.length - 1; i >= 0; i--) {
+    const g = guides[i];
+    if (g.fadeAt === null && now - g.at > GUIDE_MS) { g.fadeAt = now; g.done(null); }
+    const a = Math.min(1, (now - g.at) / 500) * (g.fadeAt === null ? 1 : Math.max(0, 1 - (now - g.fadeAt) / 500));
+    if (g.fadeAt !== null && a <= 0) { guides.splice(i, 1); continue; }
+    ctx.save();
+    ctx.strokeStyle = INK_COLOR;
+    ctx.globalAlpha = 0.5 * a;
+    ctx.lineWidth = 3.5;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.setLineDash([3, 13]); // dots to follow
+    for (const st of g.strokes) { ctx.beginPath(); st.forEach((q, k) => (k ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y))); ctx.stroke(); }
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 0.6 * a;
+    ctx.fillStyle = INK_COLOR;
+    ctx.font = '300 15px "SF Pro Display", "Helvetica Neue", system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.letterSpacing = '0.14em';
+    ctx.fillText(`TRACE THE ${g.label.toUpperCase()}`, g.box.x + g.box.w / 2, g.box.y + g.box.h + 34);
+    ctx.restore();
+  }
+}
 function startListening(): void {
   if (voice.listening || thinking) return;
   void voice.start();
@@ -168,6 +196,17 @@ function bringDrawingToLife(strokes: { x: number; y: number }[][]): void {
   const { w, h } = stage.size();
   const doodle = new Doodle(strokes, { w, h });
   creatures.push(doodle);
+  const guide = tracedGuide(strokes);
+  if (guide) {
+    // traced over an outline: we know what it is
+    guide.fadeAt = performance.now();
+    lastRec = `drawing: traced ${guide.label}`;
+    doodle.comeAlive(motionFor(guide.label, 'float'), guide.label);
+    compose();
+    setTimeout(() => void exportDrawing(doodle).then((id) => { if (id) matchClips(doodle); }), 1600);
+    guide.done(doodle);
+    return;
+  }
   doodleToPng(strokes)
     .then((png) => fetch('/api/doodle', { method: 'POST', body: png, headers: { 'content-type': 'image/png' } }))
     .then((r) => (r.ok ? r.json() : { what: 'something', motion: 'float', confidence: 0 }))
@@ -557,7 +596,7 @@ async function main() {
       for (const b of pen.takeBursts()) sparkles.burst(b.at, b.kind === 'finish' ? 16 : 10, b.kind === 'finish' ? 140 : 70);
       if (penState.mode === 'down' && penState.cursor) sparkles.trail(penState.cursor, dt); else sparkles.lift();
       if (scene?.pointing) lastPointingAt = now;
-      if ((window as any).__trace) { (window as any).__mask = mask; (window as any).__lit = lit; (window as any).__handSeen = !!scene; (window as any).__doodles = doodles; (window as any).__wallClip = () => wallClip; (window as any).__caption = () => director.caption; (window as any).__story = () => story.last; (window as any).__voice = () => ({ listening: voice.listening, thinking }); (window as any).__runner = runner; (window as any).__playPlan = (p: Plan) => { story.add(p.story, performance.now()); runner.play(p, doodles()); }; }
+      if ((window as any).__trace) { (window as any).__mask = mask; (window as any).__lit = lit; (window as any).__handSeen = !!scene; (window as any).__doodles = doodles; (window as any).__wallClip = () => wallClip; (window as any).__caption = () => director.caption; (window as any).__story = () => story.last; (window as any).__voice = () => ({ listening: voice.listening, thinking }); (window as any).__runner = runner; (window as any).__guides = () => guides.map((g) => ({ label: g.label, box: g.box, strokes: g.strokes })); (window as any).__finishDrawing = (st: { x: number; y: number }[][]) => bringDrawingToLife(st); (window as any).__playPlan = (p: Plan) => { story.add(p.story, performance.now()); runner.play(p, doodles()); }; }
       if ((window as any).__trace) console.log('[trace]', Math.round(now), scene ? `hid=${scene.tipHidden ? 1 : 0} spd=${hand.speed.toFixed(2)} pointing=${scene.pointing} tip=${Math.round(scene.tip.x)},${Math.round(scene.tip.y)} box=${JSON.stringify(scene.puppetBox)} usable=${!!usable}` : 'no scene', penState.mode, scene?.pose ?? '');
       const penNearby = penState.mode !== 'idle' || now - lastPointingAt < POINTING_QUIET_MS;
       if (penNearby) hold.reset(); // a pointing finger is a pen, not a puppet
@@ -587,9 +626,8 @@ async function main() {
     const alive = creatures.filter((c) => !c.retiring);
     for (let i = 0; i < alive.length - MAX_CREATURES; i++) alive[i].retire();
     for (const c of creatures) c.update(dt);
-    director.update(runner.busy || artist.busy || penState.mode !== 'idle');
+    director.update(runner.busy || penState.mode !== 'idle');
     runner.update();
-    artist.update(dt);
     if (director.caption && director.caption.at !== lastCaptionAt) { lastCaptionAt = director.caption.at; story.add(director.caption.text, director.caption.at); }
     sparkles.update(dt);
     let gone = false;
@@ -625,7 +663,7 @@ async function main() {
       c.save(); c.strokeStyle = `rgba(${accentAt((Math.sin(now / 500) + 1) / 2)},0.9)`; c.lineWidth = 2; c.setLineDash([6, 6]);
       c.beginPath(); c.ellipse(b.x + b.w / 2, b.y + b.h / 2, b.w / 2 + 18, b.h / 2 + 18, 0, 0, Math.PI * 2); c.stroke(); c.restore();
     }
-    artist.draw(stage.ctx, INK_COLOR, accentAt(0.5));
+    drawGuides(stage.ctx, now);
     listeningUI.draw(stage.ctx, stage.size(), { listening: voice.listening, thinking, text: voice.text, level: voice.level(), error: voice.error, stop: stopSign.progress(now) }, INK_COLOR, now);
     story.draw(stage.ctx, stage.size(), INK_COLOR, now);
     if (note) {
